@@ -1,0 +1,79 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id                   String         @id @default(cuid())
+  name                 String
+  plantType            PlantType      @default(SUCCULENT)
+  lottieFileName       String         @default("succulent-growth")
+  health               Int            @default(50)
+  growthStage          Int            @default(0)
+  animationProgress    Float          @default(0.0)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  status              ProjectStatus  @default(ACTIVE)
+  lastWateredAt       DateTime       @default(now())
+  
+  // Relations
+  focusSessions       FocusSession[]
+  
+  @@map("projects")
+}
+
+model FocusSession {
+  id              String        @id @default(cuid())
+  projectId       String
+  startTime       DateTime      @default(now())
+  endTime         DateTime?
+  durationMinutes Int?
+  sessionType     SessionType   @default(TIMED)
+  completed       Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  
+  // Relations
+  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  @@map("focus_sessions")
+}
+
+model UserSettings {
+  id                  String    @id @default(cuid())
+  soundsEnabled       Boolean   @default(true)
+  defaultFocusTime    Int       @default(25) // minutes
+  themePreference     String    @default("zen")
+  animationsEnabled   Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  
+  @@map("user_settings")
+}
+
+enum PlantType {
+  SUCCULENT
+  BONSAI
+  FLOWER
+  HERB
+  TREE
+}
+
+enum ProjectStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  DEAD
+}
+
+enum SessionType {
+  TIMED
+  OPEN
+  POMODORO
+}
