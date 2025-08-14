@@ -11,6 +11,107 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
+// Health calculation functions
+function calculateHealthFromFocusTime(totalMinutes, daysSinceLastSession = 0) {
+  // Start at 30% health
+  let health = 30;
+  
+  // For testing: Any session (even seconds) gives health boost
+  // In testing mode (sessions < 1 minute), each session gives 5% boost
+  if (totalMinutes < 1) {
+    // Count sessions by checking total seconds - each 10+ second session = 5% health
+    const totalSeconds = totalMinutes * 60;
+    const sessionCount = Math.floor(totalSeconds / 10); // Each 10-second chunk = 1 session
+    const testingBonus = Math.min(70, sessionCount * 5); // 5% per session, max 70%
+    health += testingBonus;
+    console.log(`Testing mode: ${totalSeconds}s = ${sessionCount} sessions = +${testingBonus}% health`);
+  } else {
+    // Production mode: Every 25 minutes of focus adds 10% health (up to 100%)
+    const focusBonus = Math.min(70, Math.floor(totalMinutes / 25) * 10);
+    health += focusBonus;
+    console.log(`Production mode: ${totalMinutes}min = +${focusBonus}% health`);
+  }
+  
+  // Decrease health for consecutive days without focus
+  const decayPenalty = daysSinceLastSession * 10;
+  health -= decayPenalty;
+  
+  // Ensure health stays within bounds
+  return Math.max(0, Math.min(100, health));
+}
+
+function calculateGrowthStage(health) {
+  if (health <= 0) return 0; // dead
+  if (health <= 20) return 1; // seed
+  if (health <= 40) return 2; // sprout
+  if (health <= 60) return 3; // young
+  if (health <= 80) return 4; // mature
+  return 5; // blooming
+}
+
+function getDaysSinceDate(date) {
+  const now = new Date();
+  const diffTime = Math.abs(now - new Date(date));
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+}
+
+// Update plant health based on focus sessions
+async function updatePlantHealth() {
+  try {
+    const projects = await prisma.project.findMany({
+      include: {
+        focusSessions: {
+          where: { completed: true },
+          orderBy: { createdAt: 'desc' }
+        }
+      }
+    });
+
+    for (const project of projects) {
+      // Calculate total focus time
+      const totalFocusMinutes = project.focusSessions.reduce(
+        (total, session) => total + (session.durationMinutes || 0),
+        0
+      );
+
+      // Get days since last session
+      const lastSession = project.focusSessions[0];
+      const daysSinceLastSession = lastSession 
+        ? getDaysSinceDate(lastSession.createdAt)
+        : getDaysSinceDate(project.createdAt);
+
+      // Calculate new health
+      const newHealth = calculateHealthFromFocusTime(totalFocusMinutes, daysSinceLastSession);
+      const newGrowthStage = calculateGrowthStage(newHealth);
+      
+      // Determine status
+      let status = 'ACTIVE';
+      if (newHealth <= 0) status = 'DEAD';
+      else if (newHealth <= 10) status = 'PAUSED';
+
+      // Only update if health has changed
+      if (newHealth !== project.health) {
+        await prisma.project.update({
+          where: { id: project.id },
+          data: {
+            health: newHealth,
+            status,
+            growthStage: newGrowthStage,
+            lastWateredAt: new Date()
+          }
+        });
+        
+        console.log(`Updated ${project.name}: health ${project.health} -> ${newHealth}`);
+      }
+    }
+  } catch (error) {
+    console.error('Error updating plant health:', error);
+  }
+}
+
+// Run health update every hour
+setInterval(updatePlantHealth, 60 * 60 * 1000);
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'FlowGarden API is running' });
@@ -44,19 +145,15 @@ app.post('/api/projects', async (req, res) => {
       return res.status(400).json({ error: 'Project name is required' });
     }
 
-    const lottieFileMap = {
-      'SUCCULENT': 'succulent-growth',
-      'BONSAI': 'bonsai-growth',
-      'FLOWER': 'flower-growth',
-      'HERB': 'herb-growth',
-      'TREE': 'tree-growth'
-    };
+    // Convert lowercase to uppercase for database enum
+    const plantTypeUpper = (plantType || 'succulent').toUpperCase();
 
     const project = await prisma.project.create({
       data: {
         name,
-        plantType: plantType || 'SUCCULENT',
-        lottieFileName: lottieFileMap[plantType] || 'succulent-growth'
+        plantType: plantTypeUpper,
+        health: 30, // Start with 30% health as specified
+        growthStage: 1 // Start at seed/sprout stage
       }
     });
 
@@ -94,7 +191,7 @@ app.get('/api/projects/:id', async (req, res) => {
 app.put('/api/projects/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, health, growthStage, animationProgress, status } = req.body;
+    const { name, health, growthStage, status } = req.body;
 
     const project = await prisma.project.update({
       where: { id },
@@ -102,7 +199,6 @@ app.put('/api/projects/:id', async (req, res) => {
         ...(name && { name }),
         ...(health !== undefined && { health }),
         ...(growthStage !== undefined && { growthStage }),
-        ...(animationProgress !== undefined && { animationProgress }),
         ...(status && { status }),
         lastWateredAt: new Date()
       }
@@ -127,14 +223,12 @@ app.put('/api/projects/:id/animate', async (req, res) => {
 
     const newHealth = Math.max(0, Math.min(100, project.health + (healthDelta || 0)));
     const newGrowthStage = Math.floor(newHealth / 20);
-    const progressInStage = (newHealth % 20) / 20;
 
     const updatedProject = await prisma.project.update({
       where: { id },
       data: {
         health: newHealth,
         growthStage: newGrowthStage,
-        animationProgress: progressInStage,
         lastWateredAt: new Date()
       }
     });
@@ -187,6 +281,8 @@ app.put('/api/sessions/:id/complete', async (req, res) => {
   try {
     const { id } = req.params;
     const { durationMinutes } = req.body;
+    
+    console.log(`Completing session ${id} with duration ${durationMinutes} minutes`);
 
     const session = await prisma.focusSession.update({
       where: { id },
@@ -199,20 +295,79 @@ app.put('/api/sessions/:id/complete', async (req, res) => {
         project: true
       }
     });
+    
+    console.log('Session updated:', session);
 
-    // Update plant health based on session duration
-    const healthBoost = Math.min(20, Math.floor(durationMinutes / 5)); // 1 health per 5 minutes, max 20
-    if (healthBoost > 0) {
-      await prisma.project.update({
-        where: { id: session.projectId },
-        data: {
-          health: Math.min(100, session.project.health + healthBoost),
-          lastWateredAt: new Date()
-        }
-      });
-    }
-
-    res.json(session);
+    // Recalculate health based on completed sessions
+    const allSessions = await prisma.focusSession.findMany({
+      where: { 
+        projectId: session.projectId,
+        completed: true 
+      }
+    });
+    
+    const totalFocusMinutes = allSessions.reduce(
+      (total, s) => total + (s.durationMinutes || 0),
+      0
+    );
+    
+    // For testing: Give immediate +10% health for any completed session
+    const currentHealth = session.project.health;
+    const sessionBonus = 10; // 10% per completed session for testing
+    const newHealthFromSession = Math.min(100, currentHealth + sessionBonus);
+    
+    // Also use the formula-based approach
+    const daysSinceCreation = getDaysSinceDate(session.project.createdAt);
+    const formulaHealth = calculateHealthFromFocusTime(totalFocusMinutes, 0);
+    
+    // Use the higher of the two approaches
+    const newHealth = Math.max(newHealthFromSession, formulaHealth);
+    const newGrowthStage = calculateGrowthStage(newHealth);
+    
+    console.log('Health calculation:', {
+      totalSessions: allSessions.length,
+      totalFocusMinutes,
+      currentHealth,
+      sessionBonus: `+${sessionBonus}%`,
+      newHealthFromSession,
+      formulaHealth,
+      finalNewHealth: newHealth,
+      newGrowthStage
+    });
+    
+    // If a full session was completed (25+ minutes), trigger blooming
+    const triggerBlooming = durationMinutes >= 25;
+    const bloomingHealth = triggerBlooming ? 100 : newHealth;
+    
+    const updatedProject = await prisma.project.update({
+      where: { id: session.projectId },
+      data: {
+        health: bloomingHealth,
+        growthStage: triggerBlooming ? 5 : newGrowthStage,
+        lastWateredAt: new Date()
+      }
+    });
+    
+    console.log('Project health updated:', {
+      oldHealth: session.project.health,
+      newHealth: bloomingHealth,
+      healthIncrease: `+${bloomingHealth - session.project.health}%`,
+      oldGrowthStage: session.project.growthStage,
+      newGrowthStage: triggerBlooming ? 5 : newGrowthStage
+    });
+    
+    // Return session with updated project data
+    const updatedSession = await prisma.focusSession.findUnique({
+      where: { id },
+      include: { 
+        project: true 
+      }
+    });
+    
+    res.json({
+      ...updatedSession,
+      triggerBlooming
+    });
   } catch (error) {
     console.error('Error completing focus session:', error);
     res.status(500).json({ error: 'Failed to complete focus session' });
@@ -347,6 +502,9 @@ app.use((err, req, res, next) => {
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
+
+// Run immediately on startup to update plant health (disabled for testing)
+// setTimeout(updatePlantHealth, 5000);
 
 // Graceful shutdown
 process.on('SIGINT', async () => {

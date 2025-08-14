@@ -1,19 +1,19 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
+import { PlantFactory } from '../plants/PlantFactory';
 
 const CreateProjectModal = ({ onClose, onSubmit }) => {
   const [formData, setFormData] = useState({
     name: '',
-    plantType: 'SUCCULENT'
+    plantType: 'succulent'
   });
 
-  const plantTypes = [
-    { value: 'SUCCULENT', label: '🌵 Succulent', description: 'Hardy and resilient' },
-    { value: 'BONSAI', label: '🌲 Bonsai', description: 'Requires patience and care' },
-    { value: 'FLOWER', label: '🌸 Flower', description: 'Blooms with attention' },
-    { value: 'HERB', label: '🌿 Herb', description: 'Practical and aromatic' },
-    { value: 'TREE', label: '🌳 Tree', description: 'Grows tall with time' }
-  ];
+  // Get plant types from the factory
+  const plantTypes = PlantFactory.getAvailablePlantTypes().map(type => ({
+    ...type,
+    emoji: PlantFactory.getPlantTypeEmoji(type.value),
+    displayLabel: `${PlantFactory.getPlantTypeEmoji(type.value)} ${type.label}`
+  }));
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -84,10 +84,10 @@ const CreateProjectModal = ({ onClose, onSubmit }) => {
                   />
                   <div className="flex-1">
                     <div className="flex items-center gap-3">
-                      <span className="text-2xl">{type.label.split(' ')[0]}</span>
+                      <span className="text-2xl">{type.emoji}</span>
                       <div>
                         <div className="font-medium text-zen-800">
-                          {type.label.split(' ').slice(1).join(' ')}
+                          {type.label}
                         </div>
                         <div className="text-sm text-zen-600">
                           {type.description}

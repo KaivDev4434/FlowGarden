@@ -1,57 +1,114 @@
 import { useState, useEffect, useRef } from 'react';
-import { Player } from '@lottiefiles/react-lottie-player';
-import { Edit3, Play, Trash2 } from 'lucide-react';
+import { Edit3, Play, Trash2, Heart, Droplets } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import soundService from '../services/soundService';
+import { PlantFactory } from '../plants/PlantFactory';
+import { PlantAnimationManager } from '../animations/plantAnimations';
 
 const PlantCard = ({ plant, onFocusStart, onEdit, onDelete }) => {
-  const [animationData, setAnimationData] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [plantName, setPlantName] = useState(plant.name);
-  const playerRef = useRef(null);
+  const [showCelebration, setShowCelebration] = useState(false);
+  const [isWithering, setIsWithering] = useState(false);
+  const [lastHealthUpdate, setLastHealthUpdate] = useState(plant.health);
+  const plantContainerRef = useRef(null);
+  const plantInstanceRef = useRef(null);
+  const animationManagerRef = useRef(null);
 
-  // Load animation based on plant type
+  // Initialize Anime.js plant
   useEffect(() => {
-    const loadAnimation = async () => {
+    const initializePlant = () => {
+      if (!plantContainerRef.current) return;
+
       try {
-        const response = await import(`../assets/lottie/plants/${plant.lottieFileName}.json`);
-        setAnimationData(response.default);
+        // Create plant instance
+        const plantInstance = PlantFactory.createPlant(plant.plantType || 'generic', plantContainerRef.current);
+        plantContainerRef.current.innerHTML = plantInstance.createSVG();
+        
+        // Create animation manager
+        const animationManager = new PlantAnimationManager({ current: plantContainerRef.current });
+        
+        // Store references
+        plantInstanceRef.current = plantInstance;
+        animationManagerRef.current = animationManager;
+        
+        // Initialize to current health stage
+        setTimeout(() => {
+          const currentStage = plantInstance.calculateStage(plant.health);
+          plantInstance.animateToStage(currentStage);
+          
+          // Start idle animations
+          setTimeout(() => {
+            if (plantInstance.startIdleAnimation) {
+              plantInstance.startIdleAnimation();
+            }
+          }, 1000);
+        }, 100);
+        
       } catch (error) {
-        console.error('Failed to load animation:', error);
-        // Fallback to a simple animation
-        setAnimationData({
-          v: "5.8.1",
-          fr: 30,
-          ip: 0,
-          op: 60,
-          w: 200,
-          h: 200,
-          nm: "Simple Plant",
-          layers: []
-        });
+        console.error('Failed to initialize plant:', error);
       }
     };
     
-    loadAnimation();
-  }, [plant.lottieFileName]);
+    initializePlant();
+    
+    // Cleanup function
+    return () => {
+      if (animationManagerRef.current) {
+        animationManagerRef.current.destroy();
+      }
+      if (plantInstanceRef.current) {
+        plantInstanceRef.current.destroy();
+      }
+    };
+  }, [plant.plantType]);
 
-  // Calculate animation segments based on health
-  const getCurrentSegments = (health) => {
-    const stage = Math.floor(health / 20);
-    const progress = (health % 20) / 20;
-    
-    const stages = [
-      [0, 30],   // Seed (0-20 health)
-      [30, 60],  // Sprout (21-40 health)
-      [60, 90],  // Young (41-60 health)
-      [90, 120], // Mature (61-80 health)
-      [120, 150] // Blooming (81-100 health)
-    ];
-    
-    if (stage >= stages.length) return stages[stages.length - 1];
-    
-    const [start, end] = stages[stage];
-    const currentFrame = start + (progress * (end - start));
-    
-    return [start, currentFrame];
+  // Health change detection for celebrations and stage updates
+  useEffect(() => {
+    if (plant.health !== lastHealthUpdate && plantInstanceRef.current && animationManagerRef.current) {
+      const oldStage = plantInstanceRef.current.calculateStage(lastHealthUpdate);
+      const newStage = plantInstanceRef.current.calculateStage(plant.health);
+      
+      // Handle health increase
+      if (plant.health > lastHealthUpdate) {
+        setShowCelebration(true);
+        soundService.playPlantGrowth();
+        animationManagerRef.current.celebrate();
+        setTimeout(() => setShowCelebration(false), 2000);
+      }
+      
+      // Handle stage change
+      if (newStage !== oldStage) {
+        plantInstanceRef.current.animateToStage(newStage);
+      }
+      
+      // Handle withering
+      if (plant.health < 20 && lastHealthUpdate >= 20) {
+        animationManagerRef.current.startWithering();
+      } else if (plant.health >= 20 && lastHealthUpdate < 20) {
+        animationManagerRef.current.revive();
+      }
+      
+      // Add glow for very healthy plants
+      if (plant.health >= 90 && lastHealthUpdate < 90) {
+        animationManagerRef.current.addGlowEffect();
+      }
+    }
+    setLastHealthUpdate(plant.health);
+  }, [plant.health, lastHealthUpdate]);
+
+  // Withering detection (reduced for testing)
+  useEffect(() => {
+    const minutesSinceWatered = (new Date() - new Date(plant.lastWateredAt)) / (1000 * 60);
+    setIsWithering(minutesSinceWatered > 2 && plant.health < 30); // 2 minutes for testing (was 24 hours)
+  }, [plant.lastWateredAt, plant.health]);
+
+  // Handle watering action
+  const handleWater = () => {
+    if (animationManagerRef.current) {
+      animationManagerRef.current.createWaterDrops();
+    }
+    onEdit(plant.id, { health: Math.min(100, plant.health + 10) });
   };
 
   const getHealthColor = (health) => {
@@ -91,26 +148,57 @@ const PlantCard = ({ plant, onFocusStart, onEdit, onDelete }) => {
   };
 
   return (
-    <div className="plant-card group relative">
-      {/* Plant Animation */}
+    <motion.div 
+      className="plant-card group relative"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      whileHover={{ scale: 1.02 }}
+    >
+      {/* Plant Animation Container */}
       <div className="relative mb-4">
-        {animationData && (
-          <Player
-            ref={playerRef}
-            autoplay
-            loop
-            src={animationData}
-            style={{ height: '200px', width: '200px' }}
-            className="animate-plant-sway"
+        {/* Main Plant Animation */}
+        <motion.div
+          animate={isWithering ? { rotate: [-1, 1, -1], scale: [1, 0.98, 1] } : {}}
+          transition={{ duration: 3, repeat: isWithering ? Infinity : 0 }}
+          className={`transition-all duration-500 ${isWithering ? 'opacity-70' : ''}`}
+        >
+          <div 
+            ref={plantContainerRef}
+            className="plant-anime-container"
+            style={{ 
+              width: '200px', 
+              height: '200px',
+              position: 'relative'
+            }}
           />
-        )}
+        </motion.div>
         
         {/* Health indicator overlay */}
-        <div className="absolute top-2 right-2 bg-white/90 rounded-full p-2">
+        <motion.div 
+          className="absolute top-2 right-2 bg-white/90 rounded-full p-2"
+          animate={plant.health < 20 ? { scale: [1, 1.1, 1] } : {}}
+          transition={{ duration: 1, repeat: plant.health < 20 ? Infinity : 0 }}
+        >
           <div className={`text-sm font-bold ${getHealthColor(plant.health)}`}>
             {plant.health}%
           </div>
-        </div>
+        </motion.div>
+
+        {/* Withering Warning */}
+        <AnimatePresence>
+          {isWithering && (
+            <motion.div
+              className="absolute top-2 left-2 bg-red-100 text-red-600 rounded-full p-2"
+              initial={{ opacity: 0, scale: 0 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <Droplets size={16} className="animate-pulse" />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Action buttons (visible on hover) */}
         <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -189,16 +277,56 @@ const PlantCard = ({ plant, onFocusStart, onEdit, onDelete }) => {
           <span>{timeSinceWatered()}</span>
         </div>
 
-        {/* Focus Button */}
-        <button
-          onClick={handleFocusClick}
-          className="zen-button w-full flex items-center justify-center gap-2 mt-4"
-        >
-          <Play size={16} />
-          Start Focus
-        </button>
+        {/* Action Buttons */}
+        <div className="flex gap-2 mt-4">
+          {/* Water Plant Button (if withering) */}
+          {isWithering && (
+            <motion.button
+              onClick={handleWater}
+              className="zen-button-secondary flex items-center justify-center gap-2 flex-1"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              <Droplets size={16} />
+              Water
+            </motion.button>
+          )}
+          
+          {/* Focus Button */}
+          <motion.button
+            onClick={handleFocusClick}
+            className="zen-button flex items-center justify-center gap-2 flex-1"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            <Play size={16} />
+            Start Focus
+          </motion.button>
+        </div>
+
+        {/* Plant Status Indicators */}
+        <div className="flex justify-center gap-1 mt-2">
+          {plant.health >= 80 && (
+            <motion.div
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              className="text-nature-500"
+            >
+              <Heart size={12} fill="currentColor" />
+            </motion.div>
+          )}
+          {isWithering && (
+            <motion.div
+              animate={{ opacity: [0.5, 1, 0.5] }}
+              transition={{ duration: 1, repeat: Infinity }}
+              className="text-red-500"
+            >
+              <Droplets size={12} />
+            </motion.div>
+          )}
+        </div>
       </div>
-    </div>
+    </motion.div>
   );
 };
 

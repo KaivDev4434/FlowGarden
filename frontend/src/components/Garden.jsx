@@ -1,14 +1,18 @@
 import { useState, useEffect } from 'react';
 import { Plus, Settings, BarChart3, Clock } from 'lucide-react';
-import PlantCard from './PlantCard';
+import PlantController from './Plant/PlantController';
 import CreateProjectModal from './CreateProjectModal';
 import FocusSession from './FocusSession';
+import Analytics from './Analytics';
+import PlantCareReminder from './PlantCareReminder';
+
 
 const Garden = () => {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [activeFocusSession, setActiveFocusSession] = useState(null);
+  const [showAnalytics, setShowAnalytics] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // Update clock every minute
@@ -107,29 +111,52 @@ const Garden = () => {
   };
 
   const handleFocusStart = (projectId) => {
+    console.log('Starting focus session for project:', projectId);
     const project = projects.find(p => p.id === projectId);
+    console.log('Found project:', project);
     if (project) {
       setActiveFocusSession(project);
+      console.log('Set active focus session:', project);
+    } else {
+      console.error('Project not found for ID:', projectId);
+    }
+  };
+
+  const handleWaterPlant = async (plantId) => {
+    try {
+      const response = await fetch(`http://localhost:3001/api/projects/${plantId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          health: Math.min(100, projects.find(p => p.id === plantId)?.health + 15 || 50)
+        }),
+      });
+
+      if (response.ok) {
+        const updatedProject = await response.json();
+        setProjects(prev => 
+          prev.map(p => p.id === plantId ? updatedProject : p)
+        );
+      }
+    } catch (error) {
+      console.error('Error watering plant:', error);
     }
   };
 
   const handleFocusComplete = async (sessionData) => {
-    // Update project health based on focus session
-    if (sessionData.projectId && sessionData.durationMinutes) {
-      const healthBoost = Math.min(20, Math.floor(sessionData.durationMinutes / 5));
-      
-      if (healthBoost > 0) {
-        await handleEditProject(sessionData.projectId, {
-          health: Math.min(100, 
-            projects.find(p => p.id === sessionData.projectId)?.health + healthBoost || 50
-          )
-        });
-      }
-    }
-
-    // Refresh projects to get updated data
+    console.log('Focus session completed:', sessionData);
+    
+    // Session is already completed by FocusSession component
+    // Just refresh projects to get updated health data
     await fetchProjects();
     setActiveFocusSession(null);
+    
+    // Show celebration message for significant progress
+    if (sessionData.durationMinutes >= 1) {
+      console.log('🌱 Great focus session! Your plant is growing!');
+    }
   };
 
   const formatTime = (date) => {
@@ -162,6 +189,13 @@ const Garden = () => {
     );
   }
 
+  // If analytics is requested, show analytics dashboard
+  if (showAnalytics) {
+    return (
+      <Analytics onBack={() => setShowAnalytics(false)} />
+    );
+  }
+
   return (
     <div className="min-h-screen p-6">
       {/* Header */}
@@ -189,7 +223,11 @@ const Garden = () => {
 
             {/* Action Buttons */}
             <div className="flex gap-2">
-              <button className="zen-button-secondary p-3" title="Analytics">
+              <button 
+                onClick={() => setShowAnalytics(true)}
+                className="zen-button-secondary p-3" 
+                title="Analytics"
+              >
                 <BarChart3 size={20} />
               </button>
               <button className="zen-button-secondary p-3" title="Settings">
@@ -199,6 +237,8 @@ const Garden = () => {
           </div>
         </div>
       </header>
+
+
 
       {/* Garden Grid */}
       <main>
@@ -227,12 +267,13 @@ const Garden = () => {
           // Projects Grid
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {projects.map((project) => (
-              <PlantCard
+              <PlantController
                 key={project.id}
                 plant={project}
-                onFocusStart={handleFocusStart}
-                onEdit={handleEditProject}
-                onDelete={handleDeleteProject}
+                onPlantClick={(plant) => {
+                  // For now, start focus session when plant is clicked
+                  handleFocusStart(plant.id);
+                }}
               />
             ))}
 
@@ -260,6 +301,12 @@ const Garden = () => {
           onSubmit={handleCreateProject}
         />
       )}
+
+      {/* Plant Care Reminder */}
+      <PlantCareReminder 
+        projects={projects} 
+        onWaterPlant={handleWaterPlant}
+      />
     </div>
   );
 };

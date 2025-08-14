@@ -1,31 +1,110 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Square, SkipForward } from 'lucide-react';
-import { Player } from '@lottiefiles/react-lottie-player';
+import { Play, Pause, Square, SkipForward, Volume2, VolumeX } from 'lucide-react';
+import { motion } from 'framer-motion';
+import soundService from '../services/soundService';
+import { PlantFactory } from '../plants/PlantFactory';
+import { PlantAnimationManager } from '../animations/plantAnimations';
 
 const FocusSession = ({ project, onComplete, onCancel }) => {
-  const [timeLeft, setTimeLeft] = useState(25 * 60); // 25 minutes in seconds
+  console.log('FocusSession rendered with project:', project);
+  
+  const [timeLeft, setTimeLeft] = useState(10); // 10 seconds for testing (was 25 * 60)
   const [isRunning, setIsRunning] = useState(false);
   const [sessionType, setSessionType] = useState('TIMED');
   const [sessionStartTime, setSessionStartTime] = useState(null);
+  const [sessionId, setSessionId] = useState(null);
+  const [sessionCreated, setSessionCreated] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
-  const [animationData, setAnimationData] = useState(null);
+  const [ambientPlaying, setAmbientPlaying] = useState(false);
+  const [soundsEnabled, setSoundsEnabled] = useState(true);
   
   const intervalRef = useRef(null);
-  const playerRef = useRef(null);
+  const plantContainerRef = useRef(null);
+  const plantInstanceRef = useRef(null);
+  const animationManagerRef = useRef(null);
 
-  // Load plant animation
+  // Initialize plant animation
   useEffect(() => {
-    const loadAnimation = async () => {
+    const initializePlant = () => {
+      if (!plantContainerRef.current) return;
+
       try {
-        const response = await import(`../assets/lottie/plants/${project.lottieFileName}.json`);
-        setAnimationData(response.default);
+        // Create plant instance
+        const plantInstance = PlantFactory.createPlant(project.plantType || 'generic', plantContainerRef.current);
+        plantContainerRef.current.innerHTML = plantInstance.createSVG();
+        
+        // Create animation manager
+        const animationManager = new PlantAnimationManager({ current: plantContainerRef.current });
+        
+        // Store references
+        plantInstanceRef.current = plantInstance;
+        animationManagerRef.current = animationManager;
+        
+        // Initialize to current health stage
+        setTimeout(() => {
+          const currentStage = plantInstance.calculateStage(project.health);
+          plantInstance.animateToStage(currentStage);
+          
+          // Start idle animations
+          setTimeout(() => {
+            if (plantInstance.startIdleAnimations) {
+              plantInstance.startIdleAnimations();
+            }
+          }, 1000);
+        }, 100);
+        
       } catch (error) {
-        console.error('Failed to load animation:', error);
+        console.error('Failed to initialize plant:', error);
       }
     };
     
-    loadAnimation();
-  }, [project.lottieFileName]);
+    initializePlant();
+    
+    // Cleanup function
+    return () => {
+      if (animationManagerRef.current && animationManagerRef.current.stopAllAnimations) {
+        animationManagerRef.current.stopAllAnimations();
+      }
+      if (plantInstanceRef.current && plantInstanceRef.current.stopAnimations) {
+        plantInstanceRef.current.stopAnimations();
+      }
+    };
+  }, [project.plantType, project.health]);
+
+  // Auto-create session when component mounts
+  useEffect(() => {
+    const createSession = async () => {
+      if (!sessionCreated && !sessionId) {
+        try {
+          console.log('Creating session for project:', project.id);
+          const response = await fetch('http://localhost:3001/api/sessions/start', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              projectId: project.id,
+              sessionType
+            }),
+          });
+          
+          if (response.ok) {
+            const sessionData = await response.json();
+            console.log('Session created:', sessionData);
+            setSessionId(sessionData.id);
+            setSessionStartTime(new Date());
+            setSessionCreated(true);
+          } else {
+            console.error('Failed to create session:', response.status, response.statusText);
+          }
+        } catch (error) {
+          console.error('Error creating session:', error);
+        }
+      }
+    };
+
+    createSession();
+  }, [project.id, sessionType, sessionCreated, sessionId]);
 
   // Timer logic
   useEffect(() => {
@@ -53,12 +132,16 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
   const handleStart = async () => {
     if (!isRunning) {
       setIsRunning(true);
+      
+      // Play start sound
+      soundService.playSessionStart();
+      
       if (!sessionStartTime) {
         setSessionStartTime(new Date());
         
         // Start focus session on backend
         try {
-          await fetch('http://localhost:3001/api/sessions/start', {
+          const response = await fetch('http://localhost:3001/api/sessions/start', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -68,6 +151,11 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
               sessionType
             }),
           });
+          
+          if (response.ok) {
+            const sessionData = await response.json();
+            setSessionId(sessionData.id);
+          }
         } catch (error) {
           console.error('Error starting session:', error);
         }
@@ -82,21 +170,43 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
     clearInterval(intervalRef.current);
 
     const durationMinutes = Math.floor(elapsedTime / 60);
+    console.log('Completing session:', { sessionId, durationMinutes, elapsedTime });
+    
+    // Play completion sounds
+    soundService.playSessionComplete();
+    soundService.playCelebration();
+    
+    // Stop ambient sounds
+    soundService.stopAmbient();
+    setAmbientPlaying(false);
     
     // Complete session on backend
-    try {
-      await fetch(`http://localhost:3001/api/sessions/complete`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          durationMinutes,
-          projectId: project.id
-        }),
-      });
-    } catch (error) {
-      console.error('Error completing session:', error);
+    if (sessionId) {
+      try {
+        console.log('Sending completion request for session:', sessionId);
+        const response = await fetch(`http://localhost:3001/api/sessions/${sessionId}/complete`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            durationMinutes
+          }),
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          console.log('Session completed successfully:', result);
+        } else {
+          console.error('Failed to complete session:', response.status, response.statusText);
+          const errorText = await response.text();
+          console.error('Error response:', errorText);
+        }
+      } catch (error) {
+        console.error('Error completing session:', error);
+      }
+    } else {
+      console.warn('No session ID available, cannot complete session on backend');
     }
 
     onComplete({
@@ -123,7 +233,7 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
 
   const getProgress = () => {
     if (sessionType === 'TIMED') {
-      const totalTime = 25 * 60;
+      const totalTime = 10; // 10 seconds for testing (was 25 * 60)
       return ((totalTime - timeLeft) / totalTime) * 100;
     } else {
       // For open sessions, show a gentle pulse
@@ -134,6 +244,27 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
   const getHealthBoost = () => {
     const minutes = Math.floor(elapsedTime / 60);
     return Math.min(20, Math.floor(minutes / 5));
+  };
+
+  const toggleAmbientSound = () => {
+    if (ambientPlaying) {
+      soundService.stopAmbient();
+      setAmbientPlaying(false);
+    } else {
+      soundService.playAmbient('forest');
+      setAmbientPlaying(true);
+    }
+  };
+
+  const toggleSounds = () => {
+    const newState = !soundsEnabled;
+    setSoundsEnabled(newState);
+    soundService.setEnabled(newState);
+    
+    if (!newState) {
+      soundService.stopAmbient();
+      setAmbientPlaying(false);
+    }
   };
 
   return (
@@ -151,16 +282,21 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
 
         {/* Plant Animation */}
         <div className="mb-8 flex justify-center">
-          {animationData && (
-            <Player
-              ref={playerRef}
-              autoplay
-              loop
-              src={animationData}
-              style={{ height: '200px', width: '200px' }}
-              className={isRunning ? 'animate-gentle-pulse' : ''}
+          <motion.div
+            animate={isRunning ? { scale: [1, 1.02, 1] } : {}}
+            transition={{ duration: 2, repeat: Infinity }}
+            className="focus-plant-container"
+          >
+            <div 
+              ref={plantContainerRef}
+              className="plant-anime-container"
+              style={{ 
+                width: '200px', 
+                height: '200px',
+                position: 'relative'
+              }}
             />
-          )}
+          </motion.div>
         </div>
 
         {/* Timer Display */}
@@ -215,7 +351,7 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
               }`}
               disabled={isRunning}
             >
-              25 min Timer
+              10 sec Timer (Testing)
             </button>
             <button
               onClick={() => setSessionType('OPEN')}
@@ -245,6 +381,42 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
               +{getHealthBoost()} health
             </span>
           </div>
+        </div>
+
+        {/* Sound Controls */}
+        <div className="mb-6 flex justify-center gap-2">
+          <motion.button
+            onClick={toggleSounds}
+            className={`p-3 rounded-xl transition-colors ${
+              soundsEnabled
+                ? 'bg-nature-100 text-nature-700 hover:bg-nature-200'
+                : 'bg-zen-100 text-zen-500 hover:bg-zen-200'
+            }`}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            title={soundsEnabled ? 'Disable sounds' : 'Enable sounds'}
+          >
+            {soundsEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}
+          </motion.button>
+
+          {soundsEnabled && (
+            <motion.button
+              onClick={toggleAmbientSound}
+              className={`p-3 rounded-xl transition-colors ${
+                ambientPlaying
+                  ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                  : 'bg-zen-100 text-zen-600 hover:bg-zen-200'
+              }`}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              title={ambientPlaying ? 'Stop ambient sounds' : 'Play forest sounds'}
+              initial={{ opacity: 0, scale: 0 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.3 }}
+            >
+              🌲
+            </motion.button>
+          )}
         </div>
 
         {/* Controls */}
