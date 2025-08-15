@@ -420,57 +420,7 @@ app.get('/api/sessions', async (req, res) => {
   }
 });
 
-// User Settings endpoints
-app.get('/api/settings', async (req, res) => {
-  try {
-    let settings = await prisma.userSettings.findFirst();
-    
-    if (!settings) {
-      settings = await prisma.userSettings.create({
-        data: {}
-      });
-    }
-
-    res.json(settings);
-  } catch (error) {
-    console.error('Error fetching settings:', error);
-    res.status(500).json({ error: 'Failed to fetch settings' });
-  }
-});
-
-app.put('/api/settings', async (req, res) => {
-  try {
-    const { soundsEnabled, defaultFocusTime, themePreference, animationsEnabled } = req.body;
-
-    let settings = await prisma.userSettings.findFirst();
-    
-    if (!settings) {
-      settings = await prisma.userSettings.create({
-        data: {
-          soundsEnabled,
-          defaultFocusTime,
-          themePreference,
-          animationsEnabled
-        }
-      });
-    } else {
-      settings = await prisma.userSettings.update({
-        where: { id: settings.id },
-        data: {
-          ...(soundsEnabled !== undefined && { soundsEnabled }),
-          ...(defaultFocusTime !== undefined && { defaultFocusTime }),
-          ...(themePreference && { themePreference }),
-          ...(animationsEnabled !== undefined && { animationsEnabled })
-        }
-      });
-    }
-
-    res.json(settings);
-  } catch (error) {
-    console.error('Error updating settings:', error);
-    res.status(500).json({ error: 'Failed to update settings' });
-  }
-});
+// User Settings endpoints (comprehensive version below)
 
 // Analytics endpoints
 app.get('/api/analytics', async (req, res) => {
@@ -622,7 +572,8 @@ app.get('/api/settings', async (req, res) => {
           longBreakTimeUnit: 'seconds',
           autoStartBreaks: true, // Enable auto-breaks by default
           themePreference: 'zen',
-          animationsEnabled: true
+          animationsEnabled: true,
+          clockFormat: '24h'
         }
       });
     }
@@ -656,6 +607,7 @@ app.put('/api/settings', async (req, res) => {
       animationsEnabled,
       reducedMotion,
       plantAnimationSpeed,
+      clockFormat,
       browserNotifications,
       sessionReminders,
       plantCareReminders,
@@ -689,6 +641,7 @@ app.put('/api/settings', async (req, res) => {
       if (animationsEnabled !== undefined) updateData.animationsEnabled = animationsEnabled;
       if (reducedMotion !== undefined) updateData.reducedMotion = reducedMotion;
       if (plantAnimationSpeed !== undefined) updateData.plantAnimationSpeed = plantAnimationSpeed;
+      if (clockFormat !== undefined) updateData.clockFormat = clockFormat;
       if (browserNotifications !== undefined) updateData.browserNotifications = browserNotifications;
       if (sessionReminders !== undefined) updateData.sessionReminders = sessionReminders;
       if (plantCareReminders !== undefined) updateData.plantCareReminders = plantCareReminders;
@@ -697,6 +650,8 @@ app.put('/api/settings', async (req, res) => {
       if (betaFeatures !== undefined) updateData.betaFeatures = betaFeatures;
 
       console.log('Updating settings with data:', updateData);
+    console.log('clockFormat from request:', clockFormat);
+    console.log('clockFormat in updateData:', updateData.clockFormat);
       
       settings = await prisma.userSettings.update({
         where: { id: settings.id },
@@ -725,6 +680,7 @@ app.put('/api/settings', async (req, res) => {
           animationsEnabled,
           reducedMotion,
           plantAnimationSpeed,
+          clockFormat,
           browserNotifications,
           sessionReminders,
           plantCareReminders,

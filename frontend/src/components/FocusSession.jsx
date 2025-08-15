@@ -5,7 +5,7 @@ import soundService from '../services/soundService';
 import { PlantFactory } from '../plants/PlantFactory';
 import { PlantAnimationManager } from '../animations/plantAnimations';
 
-const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refreshSettings = false }) => {
+const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refreshSettings = false, autoStart = false }) => {
   console.log('FocusSession rendered with project:', project);
   
   const [userSettings, setUserSettings] = useState(null);
@@ -112,6 +112,13 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
 
     loadUserSettings();
   }, []);
+
+  // Auto-start the focus timer if requested (e.g., after a break)
+  useEffect(() => {
+    if (autoStart && !isRunning) {
+      handleStart();
+    }
+  }, [autoStart]);
 
   // Auto-create session when component mounts
   useEffect(() => {
@@ -278,51 +285,35 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
       console.warn('No session ID available, cannot complete session on backend');
     }
 
-    // Check if auto-breaks are enabled and start break session
-    console.log('Focus session complete - checking auto-break settings:', {
-      userSettings: userSettings,
-      autoStartBreaks: userSettings?.autoStartBreaks
-    });
-    
-    // FORCE break start for testing - ignore settings for now
-    const shouldStartBreak = true; // Always start break for testing
-    
-    if (shouldStartBreak) {
-      try {
-        const breakType = await calculateNextBreakType();
-        console.log(`Starting ${breakType} break after focus session (auto-breaks: ${userSettings?.autoStartBreaks})`);
-        
-        const sessionData = {
-          projectId: project.id,
-          durationMinutes,
-          completed: true,
-          startBreak: true,
-          breakType,
-          sessionNumber: 1
-        };
-        
-        console.log('CALLING onComplete with break data:', sessionData);
-        // Pass break info to parent component
-        onComplete(sessionData);
-        console.log('onComplete called successfully with break data');
-      } catch (error) {
-        console.error('Error in break startup:', error);
-        // Fallback - complete without break
-        onComplete({
-          projectId: project.id,
-          durationMinutes,
-          completed: true
-        });
-      }
-    } else {
-      console.log('Auto-breaks disabled - completing without break');
+    // Always go to the break screen. Auto-start of the timer is handled inside BreakSession
+    // based on the user setting `autoStartBreaks`.
+    try {
+      const breakType = await calculateNextBreakType();
+      console.log(`Navigating to ${breakType} break after focus session`);
+      
       const sessionData = {
         projectId: project.id,
         durationMinutes,
-        completed: true
+        completed: true,
+        startBreak: true,
+        breakType,
+        sessionNumber
       };
-      console.log('CALLING onComplete without break data:', sessionData);
+      
+      console.log('CALLING onComplete with break data:', sessionData);
       onComplete(sessionData);
+      console.log('onComplete called successfully with break data');
+    } catch (error) {
+      console.error('Error preparing break session:', error);
+      // As a fallback, still navigate to a short break screen
+      onComplete({
+        projectId: project.id,
+        durationMinutes,
+        completed: true,
+        startBreak: true,
+        breakType: 'SHORT',
+        sessionNumber
+      });
     }
   };
 

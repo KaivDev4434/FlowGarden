@@ -43,6 +43,7 @@ const Settings = ({ onBack }) => {
     animationsEnabled: true,
     reducedMotion: false,
     plantAnimationSpeed: 'normal',
+    clockFormat: '24h',
     
     // Notification Settings
     browserNotifications: true,
@@ -92,6 +93,9 @@ const Settings = ({ onBack }) => {
   const saveSettings = async () => {
     setSaving(true);
     try {
+      console.log('=== Settings: Saving settings:', settings);
+      console.log('=== Settings: clockFormat being saved:', settings.clockFormat);
+      
       const response = await fetch('http://localhost:3001/api/settings', {
         method: 'PUT',
         headers: {
@@ -101,6 +105,8 @@ const Settings = ({ onBack }) => {
       });
 
       if (response.ok) {
+        const savedSettings = await response.json();
+        console.log('=== Settings: Backend response:', savedSettings);
         setOriginalSettings(settings);
         setHasChanges(false);
         console.log('Settings saved successfully');
@@ -137,6 +143,7 @@ const Settings = ({ onBack }) => {
       animationsEnabled: true,
       reducedMotion: false,
       plantAnimationSpeed: 'normal',
+      clockFormat: '24h',
       browserNotifications: true,
       sessionReminders: true,
       plantCareReminders: true,
@@ -598,6 +605,21 @@ const Settings = ({ onBack }) => {
                   { value: 'normal', label: 'Normal' },
                   { value: 'fast', label: 'Fast' },
                   { value: 'instant', label: 'Instant' }
+                ]}
+              />
+            </SettingRow>
+
+            <SettingRow
+              icon={Clock}
+              title="Clock Format"
+              description="Choose between 12-hour and 24-hour time display"
+            >
+              <Select
+                value={settings.clockFormat}
+                onChange={(value) => updateSetting('clockFormat', value)}
+                options={[
+                  { value: '12h', label: '12-hour (AM/PM)' },
+                  { value: '24h', label: '24-hour' }
                 ]}
               />
             </SettingRow>

@@ -110,13 +110,8 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
     };
   }, []); // Empty dependency array to run only once
 
-  // Auto-start the timer when component mounts
-  useEffect(() => {
-    if (!isRunning && !breakStartTime) {
-      console.log('=== BREAK SESSION: Auto-starting timer ===');
-      handleStart();
-    }
-  }, []); // Only run once on mount
+  // If auto-start breaks is disabled, don't auto-start here.
+  // Start is handled by settings-based effect above.
 
   // Timer logic
   useEffect(() => {
@@ -466,6 +461,18 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
               <div className="text-blue-600 text-sm font-medium">
                 🎯 Ready for Focus Session {sessionNumber + 1}
               </div>
+              {userSettings?.autoStartPomodoros ? (
+                <div className="text-blue-500 text-xs opacity-70">
+                  Next session will start automatically...
+                </div>
+              ) : (
+                <button
+                  onClick={onComplete}
+                  className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                >
+                  Start Next Session
+                </button>
+              )}
               <button
                 onClick={onCancel}
                 className="text-blue-500 hover:text-blue-700 transition-colors text-sm flex items-center gap-2 mx-auto opacity-60 hover:opacity-100"

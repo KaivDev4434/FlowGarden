@@ -19,6 +19,15 @@ const Garden = () => {
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [settings, setSettings] = useState({
+    clockFormat: '24h'
+  });
+  const [autoStartNextFocus, setAutoStartNextFocus] = useState(false);
+
+  // Debug settings changes
+  useEffect(() => {
+    console.log('=== Settings state changed:', settings);
+  }, [settings]);
 
   // Update clock every minute
   useEffect(() => {
@@ -29,9 +38,10 @@ const Garden = () => {
     return () => clearInterval(timer);
   }, []);
 
-  // Fetch projects on component mount
+  // Fetch projects and settings on component mount
   useEffect(() => {
     fetchProjects();
+    fetchSettings();
   }, []);
 
   const fetchProjects = async () => {
@@ -47,6 +57,26 @@ const Garden = () => {
       console.error('Error fetching projects:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/api/settings');
+      if (response.ok) {
+        const userSettings = await response.json();
+        console.log('=== fetchSettings: Received settings:', userSettings);
+        setSettings(prev => {
+          const newSettings = {
+            ...prev,
+            ...userSettings
+          };
+          console.log('=== fetchSettings: Updated settings state:', newSettings);
+          return newSettings;
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching settings:', error);
     }
   };
 
@@ -180,8 +210,13 @@ const Garden = () => {
       setActiveBreakSession(breakSessionData);
       console.log('activeBreakSession state set');
     } else {
-      // If auto-breaks are disabled, still show a simple message
-      console.log('=== GARDEN: Focus session completed - no auto-break configured ===');
+      // If auto-breaks are disabled or no break triggered
+      if (sessionData.autoBreaksDisabled) {
+        console.log('=== GARDEN: Auto-breaks disabled - returning to garden, resetting session count ===');
+        setPomodoroSessionCount(0); // Reset when auto-breaks are off
+      } else {
+        console.log('=== GARDEN: Focus session completed - no auto-break configured ===');
+      }
     }
     
     setActiveFocusSession(null);
@@ -192,23 +227,45 @@ const Garden = () => {
     }
   };
 
-  const handleBreakComplete = () => {
+  const handleBreakComplete = async () => {
     console.log('=== GARDEN: Break session completed ===');
     console.log('Current activeBreakSession before clearing:', activeBreakSession);
     
-    // For Pomodoro cycle: start next focus session instead of returning to garden
+    // Capture the project to resume before clearing state
+    const projectToResume = activeBreakSession?.project;
+
+    // Check user settings for auto-start pomodoros
+    let shouldAutoStartNextSession = false;
+    try {
+      const response = await fetch('http://localhost:3001/api/settings');
+      if (response.ok) {
+        const settings = await response.json();
+        shouldAutoStartNextSession = settings.autoStartPomodoros === true;
+        console.log('=== GARDEN: autoStartPomodoros setting:', shouldAutoStartNextSession);
+      }
+    } catch (error) {
+      console.error('Error fetching settings for break completion:', error);
+    }
+    
     setTimeout(() => {
       // Clear break session state
       setActiveBreakSession(null);
       
-      // Start next focus session with the same project
-      if (activeBreakSession?.project) {
-        console.log('=== GARDEN: Starting next focus session (Pomodoro cycle) ===');
-        setActiveFocusSession(activeBreakSession.project);
+      if (projectToResume) {
+        if (shouldAutoStartNextSession) {
+          console.log('=== GARDEN: Auto-starting next focus session (autoStartPomodoros enabled) ===');
+          setAutoStartNextFocus(true);
+        } else {
+          console.log('=== GARDEN: Navigating to focus session (autoStartPomodoros disabled) ===');
+          setAutoStartNextFocus(false);
+        }
+        setActiveFocusSession(projectToResume);
       } else {
-        console.log('=== GARDEN: No project available, returning to garden ===');
+        console.log('=== GARDEN: Returning to garden (no project to resume) ===');
         setActiveFocusSession(null);
         fetchProjects();
+        // Reset session count when returning to garden
+        setPomodoroSessionCount(0);
       }
     }, 10);
   };
@@ -232,11 +289,14 @@ const Garden = () => {
   };
 
   const formatTime = (date) => {
-    return date.toLocaleTimeString([], { 
+    console.log('=== formatTime called with clockFormat:', settings.clockFormat, 'hour12 will be:', settings.clockFormat === '12h');
+    const result = date.toLocaleTimeString([], { 
       hour: '2-digit', 
       minute: '2-digit',
-      hour12: false 
+      hour12: settings.clockFormat === '12h'
     });
+    console.log('=== formatTime result:', result);
+    return result;
   };
 
   if (loading) {
@@ -274,6 +334,7 @@ const Garden = () => {
       <FocusSession
         project={activeFocusSession}
         sessionNumber={pomodoroSessionCount + 1}
+        autoStart={autoStartNextFocus}
         onComplete={handleFocusComplete}
         onCancel={handleExitPomodoroCycle}
       />
@@ -290,15 +351,19 @@ const Garden = () => {
   // If settings is requested, show settings page
   if (showSettings) {
     return (
-      <SettingsPage onBack={() => {
+      <SettingsPage onBack={async () => {
         setShowSettings(false);
-        // Refresh projects to get any updated settings effects
-        fetchProjects();
+        // Refresh projects and settings to get any updated settings effects
+        await fetchProjects();
+        await fetchSettings();
+        console.log('=== Settings back handler: Settings refreshed');
       }} />
     );
   }
 
   console.log('=== GARDEN RENDER: Rendering main garden view ===');
+  console.log('=== GARDEN RENDER: Current settings:', settings);
+  console.log('=== GARDEN RENDER: Current clockFormat:', settings.clockFormat);
   
   return (
     <div className="min-h-screen p-6">

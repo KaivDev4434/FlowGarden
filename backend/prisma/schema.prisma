@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,101 +8,83 @@ datasource db {
 }
 
 model Project {
-  id                   String         @id @default(cuid())
-  name                 String
-  plantType            PlantType      @default(SUCCULENT)
-  health               Int            @default(50)
-  growthStage          Int            @default(0)
-  createdAt           DateTime       @default(now())
-  updatedAt           DateTime       @updatedAt
-  status              ProjectStatus  @default(ACTIVE)
-  lastWateredAt       DateTime       @default(now())
-  
-  // Relations
-  focusSessions       FocusSession[]
-  breakSessions       BreakSession[]
-  
+  id            String         @id @default(cuid())
+  name          String
+  plantType     PlantType      @default(SUCCULENT)
+  health        Int            @default(50)
+  growthStage   Int            @default(0)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  status        ProjectStatus  @default(ACTIVE)
+  lastWateredAt DateTime       @default(now())
+  breakSessions BreakSession[]
+  focusSessions FocusSession[]
+
   @@map("projects")
 }
 
 model FocusSession {
-  id              String        @id @default(cuid())
+  id              String      @id @default(cuid())
   projectId       String
-  startTime       DateTime      @default(now())
+  startTime       DateTime    @default(now())
   endTime         DateTime?
   durationMinutes Int?
-  sessionType     SessionType   @default(TIMED)
-  completed       Boolean       @default(false)
-  sessionNumber   Int           @default(1) // Which session in the daily cycle (1, 2, 3, 4...)
-  createdAt       DateTime      @default(now())
-  
-  // Relations
-  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  
+  sessionType     SessionType @default(TIMED)
+  completed       Boolean     @default(false)
+  sessionNumber   Int         @default(1)
+  createdAt       DateTime    @default(now())
+  project         Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
   @@map("focus_sessions")
 }
 
 model BreakSession {
-  id              String        @id @default(cuid())
+  id              String    @id @default(cuid())
   projectId       String
-  breakType       BreakType     @default(SHORT)
-  startTime       DateTime      @default(now())
+  breakType       BreakType @default(SHORT)
+  startTime       DateTime  @default(now())
   endTime         DateTime?
   durationMinutes Int?
-  completed       Boolean       @default(false)
-  skipped         Boolean       @default(false)
-  sessionNumber   Int           @default(1) // Which break in the daily cycle
-  createdAt       DateTime      @default(now())
-  
-  // Relations
-  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  
+  completed       Boolean   @default(false)
+  skipped         Boolean   @default(false)
+  sessionNumber   Int       @default(1)
+  createdAt       DateTime  @default(now())
+  project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
   @@map("break_sessions")
 }
 
 model UserSettings {
-  id                    String    @id @default(cuid())
-  
-  // Timer Settings (now supports flexible time units)
-  defaultFocusTime      Float     @default(10) // value
-  defaultFocusTimeUnit  String    @default("seconds") // seconds, minutes, hours
-  shortBreakTime        Float     @default(2)  // value
-  shortBreakTimeUnit    String    @default("seconds") // seconds, minutes, hours
-  longBreakTime         Float     @default(5)  // value
-  longBreakTimeUnit     String    @default("seconds") // seconds, minutes, hours
-  autoStartBreaks       Boolean   @default(true)  // Auto-start breaks by default
-  autoStartPomodoros    Boolean   @default(false)
-  
-  // Pomodoro Cycle Settings
-  shortBreaksBeforeLong Int       @default(3)  // 3 short breaks before 1 long break
-  maxSessionsPerDay     Int       @default(8)  // Maximum focus sessions per day
-  longBreakInterval     Int       @default(4)  // Long break after every 4 focus sessions
-  
-  // Sound Settings
-  soundsEnabled         Boolean   @default(true)
-  notificationSounds    Boolean   @default(true)
-  ambientSounds         Boolean   @default(true)
-  volume                Int       @default(70) // 0-100
-  
-  // Visual Settings
-  themePreference       String    @default("zen")
-  animationsEnabled     Boolean   @default(true)
-  reducedMotion         Boolean   @default(false)
-  plantAnimationSpeed   String    @default("normal") // slow, normal, fast, instant
-  
-  // Notification Settings
-  browserNotifications  Boolean   @default(true)
-  sessionReminders      Boolean   @default(true)
-  plantCareReminders    Boolean   @default(true)
-  
-  // Advanced Settings
-  autoSaveEnabled       Boolean   @default(true)
-  dataCollection        Boolean   @default(true)
-  betaFeatures          Boolean   @default(false)
-  
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-  
+  id                    String   @id @default(cuid())
+  defaultFocusTime      Float    @default(10)
+  defaultFocusTimeUnit  String   @default("seconds")
+  shortBreakTime        Float    @default(2)
+  shortBreakTimeUnit    String   @default("seconds")
+  longBreakTime         Float    @default(5)
+  longBreakTimeUnit     String   @default("seconds")
+  autoStartBreaks       Boolean  @default(true)
+  autoStartPomodoros    Boolean  @default(false)
+  shortBreaksBeforeLong Int      @default(3)
+  maxSessionsPerDay     Int      @default(8)
+  longBreakInterval     Int      @default(4)
+  soundsEnabled         Boolean  @default(true)
+  notificationSounds    Boolean  @default(true)
+  ambientSounds         Boolean  @default(true)
+  volume                Int      @default(70)
+  themePreference       String   @default("zen")
+  animationsEnabled     Boolean  @default(true)
+  reducedMotion         Boolean  @default(false)
+  plantAnimationSpeed   String   @default("normal")
+  clockFormat           String   @default("24h")
+  browserNotifications  Boolean  @default(true)
+  sessionReminders      Boolean  @default(true)
+  plantCareReminders    Boolean  @default(true)
+  autoSaveEnabled       Boolean  @default(true)
+  dataCollection        Boolean  @default(true)
+  betaFeatures          Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
   @@map("user_settings")
 }
 
