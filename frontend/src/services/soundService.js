@@ -141,6 +141,22 @@ class SoundService {
     setTimeout(() => this.generateTone(1046.50, 0.5), 450); // C6
   }
 
+  // Break session sounds
+  async playBreakStart() {
+    await this.ensureAudioContext();
+    // Gentle break start chime
+    this.generateTone(493.88, 0.2, 'sine'); // B4
+    setTimeout(() => this.generateTone(587.33, 0.3, 'sine'), 150); // D5
+  }
+
+  async playBreakComplete() {
+    await this.ensureAudioContext();
+    // Break completion melody
+    this.generateTone(392.00, 0.2, 'triangle'); // G4
+    setTimeout(() => this.generateTone(493.88, 0.2, 'triangle'), 150); // B4
+    setTimeout(() => this.generateTone(587.33, 0.4, 'triangle'), 300); // D5
+  }
+
   // Ambient sounds
   async playAmbient(type = 'forest') {
     this.stopAmbient();

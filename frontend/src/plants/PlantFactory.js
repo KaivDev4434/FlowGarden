@@ -24,4 +24,15 @@ export class PlantFactory {
       { type: 'succulent', name: 'Succulent', description: 'A hardy desert plant' }
     ];
   }
+
+  static getPlantTypeEmoji(type) {
+    const emojis = {
+      generic: '🌻',
+      sunflower: '🌻',
+      bonsai: '🌳',
+      succulent: '🌵',
+      flower: '🌸'
+    };
+    return emojis[type] || '🌱';
+  }
 }

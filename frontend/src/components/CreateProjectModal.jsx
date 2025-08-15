@@ -5,14 +5,14 @@ import { PlantFactory } from '../plants/PlantFactory';
 const CreateProjectModal = ({ onClose, onSubmit }) => {
   const [formData, setFormData] = useState({
     name: '',
-    plantType: 'succulent'
+    plantType: 'generic'
   });
 
   // Get plant types from the factory
   const plantTypes = PlantFactory.getAvailablePlantTypes().map(type => ({
     ...type,
-    emoji: PlantFactory.getPlantTypeEmoji(type.value),
-    displayLabel: `${PlantFactory.getPlantTypeEmoji(type.value)} ${type.label}`
+    emoji: PlantFactory.getPlantTypeEmoji(type.type),
+    displayLabel: `${PlantFactory.getPlantTypeEmoji(type.type)} ${type.name}`
   }));
 
   const handleSubmit = (e) => {
@@ -67,9 +67,9 @@ const CreateProjectModal = ({ onClose, onSubmit }) => {
             <div className="grid grid-cols-1 gap-2">
               {plantTypes.map((type) => (
                 <label
-                  key={type.value}
+                  key={type.type}
                   className={`flex items-center p-3 rounded-lg border-2 cursor-pointer transition-all ${
-                    formData.plantType === type.value
+                    formData.plantType === type.type
                       ? 'border-nature-500 bg-nature-50'
                       : 'border-zen-200 hover:border-zen-300'
                   }`}
@@ -77,8 +77,8 @@ const CreateProjectModal = ({ onClose, onSubmit }) => {
                   <input
                     type="radio"
                     name="plantType"
-                    value={type.value}
-                    checked={formData.plantType === type.value}
+                    value={type.type}
+                    checked={formData.plantType === type.type}
                     onChange={(e) => setFormData(prev => ({ ...prev, plantType: e.target.value }))}
                     className="sr-only"
                   />
@@ -87,7 +87,7 @@ const CreateProjectModal = ({ onClose, onSubmit }) => {
                       <span className="text-2xl">{type.emoji}</span>
                       <div>
                         <div className="font-medium text-zen-800">
-                          {type.label}
+                          {type.name}
                         </div>
                         <div className="text-sm text-zen-600">
                           {type.description}
@@ -95,7 +95,7 @@ const CreateProjectModal = ({ onClose, onSubmit }) => {
                       </div>
                     </div>
                   </div>
-                  {formData.plantType === type.value && (
+                  {formData.plantType === type.type && (
                     <div className="w-5 h-5 bg-nature-500 rounded-full flex items-center justify-center">
                       <div className="w-2 h-2 bg-white rounded-full"></div>
                     </div>

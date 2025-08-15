@@ -5,6 +5,8 @@ import CreateProjectModal from './CreateProjectModal';
 import FocusSession from './FocusSession';
 import Analytics from './Analytics';
 import PlantCareReminder from './PlantCareReminder';
+import SettingsPage from './Settings';
+import BreakSession from './BreakSession';
 
 
 const Garden = () => {
@@ -12,7 +14,10 @@ const Garden = () => {
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [activeFocusSession, setActiveFocusSession] = useState(null);
+  const [activeBreakSession, setActiveBreakSession] = useState(null);
+  const [pomodoroSessionCount, setPomodoroSessionCount] = useState(0);
   const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // Update clock every minute
@@ -146,17 +151,84 @@ const Garden = () => {
   };
 
   const handleFocusComplete = async (sessionData) => {
-    console.log('Focus session completed:', sessionData);
+    console.log('=== GARDEN: Focus session completed ===');
+    console.log('Session data received:', sessionData);
+    console.log('Should start break?', sessionData.startBreak);
+    console.log('Break type:', sessionData.breakType);
+    console.log('Active focus session:', activeFocusSession);
+    
+    // Increment Pomodoro session count
+    const newSessionCount = pomodoroSessionCount + 1;
+    setPomodoroSessionCount(newSessionCount);
+    console.log(`=== POMODORO: Completed session ${newSessionCount} ===`);
     
     // Session is already completed by FocusSession component
     // Just refresh projects to get updated health data
     await fetchProjects();
+    
+    // Check if we should start a break session
+    if (sessionData.startBreak) {
+      console.log(`=== GARDEN: Starting ${sessionData.breakType} break session ===`);
+      
+      const breakSessionData = {
+        project: activeFocusSession, // This contains the project data
+        breakType: sessionData.breakType,
+        sessionNumber: newSessionCount
+      };
+      
+      console.log('Break session data:', breakSessionData);
+      setActiveBreakSession(breakSessionData);
+      console.log('activeBreakSession state set');
+    } else {
+      // If auto-breaks are disabled, still show a simple message
+      console.log('=== GARDEN: Focus session completed - no auto-break configured ===');
+    }
+    
     setActiveFocusSession(null);
     
     // Show celebration message for significant progress
     if (sessionData.durationMinutes >= 1) {
       console.log('🌱 Great focus session! Your plant is growing!');
     }
+  };
+
+  const handleBreakComplete = () => {
+    console.log('=== GARDEN: Break session completed ===');
+    console.log('Current activeBreakSession before clearing:', activeBreakSession);
+    
+    // For Pomodoro cycle: start next focus session instead of returning to garden
+    setTimeout(() => {
+      // Clear break session state
+      setActiveBreakSession(null);
+      
+      // Start next focus session with the same project
+      if (activeBreakSession?.project) {
+        console.log('=== GARDEN: Starting next focus session (Pomodoro cycle) ===');
+        setActiveFocusSession(activeBreakSession.project);
+      } else {
+        console.log('=== GARDEN: No project available, returning to garden ===');
+        setActiveFocusSession(null);
+        fetchProjects();
+      }
+    }, 10);
+  };
+
+  const handleBreakSkip = () => {
+    console.log('Break session skipped in Garden');
+    setActiveBreakSession(null);
+    // When break is skipped, continue the cycle with next focus session
+    if (activeBreakSession?.project) {
+      console.log('=== GARDEN: Break skipped, starting next focus session ===');
+      setActiveFocusSession(activeBreakSession.project);
+    }
+  };
+
+  const handleExitPomodoroCycle = () => {
+    console.log('=== POMODORO: Exiting cycle, returning to garden ===');
+    setActiveFocusSession(null);
+    setActiveBreakSession(null);
+    setPomodoroSessionCount(0);
+    fetchProjects();
   };
 
   const formatTime = (date) => {
@@ -179,12 +251,31 @@ const Garden = () => {
   }
 
   // If there's an active focus session, show the focus view
+  // If break session is active, show break session
+  console.log('=== GARDEN RENDER: Checking activeBreakSession ===', activeBreakSession);
+  
+  if (activeBreakSession) {
+    console.log('=== GARDEN RENDER: Rendering BreakSession ===');
+    return (
+      <BreakSession
+        project={activeBreakSession.project}
+        breakType={activeBreakSession.breakType}
+        sessionNumber={activeBreakSession.sessionNumber}
+        onComplete={handleBreakComplete}
+        onSkip={handleBreakSkip}
+        onCancel={() => setActiveBreakSession(null)}
+      />
+    );
+  }
+
+  // If focus session is active, show focus session
   if (activeFocusSession) {
     return (
       <FocusSession
         project={activeFocusSession}
+        sessionNumber={pomodoroSessionCount + 1}
         onComplete={handleFocusComplete}
-        onCancel={() => setActiveFocusSession(null)}
+        onCancel={handleExitPomodoroCycle}
       />
     );
   }
@@ -196,6 +287,19 @@ const Garden = () => {
     );
   }
 
+  // If settings is requested, show settings page
+  if (showSettings) {
+    return (
+      <SettingsPage onBack={() => {
+        setShowSettings(false);
+        // Refresh projects to get any updated settings effects
+        fetchProjects();
+      }} />
+    );
+  }
+
+  console.log('=== GARDEN RENDER: Rendering main garden view ===');
+  
   return (
     <div className="min-h-screen p-6">
       {/* Header */}
@@ -230,7 +334,11 @@ const Garden = () => {
               >
                 <BarChart3 size={20} />
               </button>
-              <button className="zen-button-secondary p-3" title="Settings">
+              <button 
+                onClick={() => setShowSettings(true)}
+                className="zen-button-secondary p-3" 
+                title="Settings"
+              >
                 <Settings size={20} />
               </button>
             </div>

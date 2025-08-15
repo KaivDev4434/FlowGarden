@@ -1,14 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Square, SkipForward, Volume2, VolumeX } from 'lucide-react';
+import { Play, Pause, Square, SkipForward, Volume2, VolumeX, RotateCcw } from 'lucide-react';
 import { motion } from 'framer-motion';
 import soundService from '../services/soundService';
 import { PlantFactory } from '../plants/PlantFactory';
 import { PlantAnimationManager } from '../animations/plantAnimations';
 
-const FocusSession = ({ project, onComplete, onCancel }) => {
+const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refreshSettings = false }) => {
   console.log('FocusSession rendered with project:', project);
   
-  const [timeLeft, setTimeLeft] = useState(10); // 10 seconds for testing (was 25 * 60)
+  const [userSettings, setUserSettings] = useState(null);
+  const [timeLeft, setTimeLeft] = useState(10); // Will be updated from settings
+  const [originalTimeLeft, setOriginalTimeLeft] = useState(10); // Store original duration
   const [isRunning, setIsRunning] = useState(false);
   const [sessionType, setSessionType] = useState('TIMED');
   const [sessionStartTime, setSessionStartTime] = useState(null);
@@ -71,6 +73,46 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
     };
   }, [project.plantType, project.health]);
 
+  // Helper function to convert time to seconds
+  const convertToSeconds = (value, unit) => {
+    switch (unit) {
+      case 'seconds': return value;
+      case 'minutes': return value * 60;
+      case 'hours': return value * 3600;
+      default: return value * 60; // Default to minutes for backward compatibility
+    }
+  };
+
+  // Load user settings
+  useEffect(() => {
+    const loadUserSettings = async () => {
+      try {
+        const response = await fetch('http://localhost:3001/api/settings');
+        if (response.ok) {
+          const settings = await response.json();
+          setUserSettings(settings);
+          
+          // Convert focus time to seconds using the time unit
+          const focusTimeValue = settings.defaultFocusTime || 10;
+          const focusTimeUnit = settings.defaultFocusTimeUnit || 'seconds';
+          const timerDuration = convertToSeconds(focusTimeValue, focusTimeUnit);
+          
+          setTimeLeft(timerDuration);
+          setOriginalTimeLeft(timerDuration);
+          console.log('Loaded user settings:', settings);
+          console.log(`Focus timer set to: ${timerDuration} seconds (${focusTimeValue} ${focusTimeUnit})`);
+        }
+      } catch (error) {
+        console.error('Error loading user settings:', error);
+        // Fallback to 10 seconds for testing
+        setTimeLeft(10);
+        setOriginalTimeLeft(10);
+      }
+    };
+
+    loadUserSettings();
+  }, []);
+
   // Auto-create session when component mounts
   useEffect(() => {
     const createSession = async () => {
@@ -111,13 +153,7 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
     if (isRunning) {
       intervalRef.current = setInterval(() => {
         if (sessionType === 'TIMED') {
-          setTimeLeft(prev => {
-            if (prev <= 1) {
-              handleComplete();
-              return 0;
-            }
-            return prev - 1;
-          });
+                setTimeLeft(prev => prev - 1);
         }
         
         setElapsedTime(prev => prev + 1);
@@ -128,6 +164,14 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
 
     return () => clearInterval(intervalRef.current);
   }, [isRunning, sessionType]);
+
+  // Handle timer completion
+  useEffect(() => {
+    if (timeLeft <= 0 && sessionType === 'TIMED' && isRunning) {
+      console.log('=== TIMER COMPLETED: timeLeft reached 0 ===');
+      handleComplete();
+    }
+  }, [timeLeft, sessionType, isRunning]);
 
   const handleStart = async () => {
     if (!isRunning) {
@@ -162,6 +206,31 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
       }
     } else {
       setIsRunning(false);
+    }
+  };
+
+  // Calculate next break type based on session number and settings
+  const calculateNextBreakType = async () => {
+    if (!userSettings) return 'SHORT';
+    
+    try {
+      // Get today's completed focus sessions for this project
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const response = await fetch(`http://localhost:3001/api/projects/${project.id}/sessions?since=${today.toISOString()}`);
+      const sessions = response.ok ? await response.json() : [];
+      
+      const completedSessions = sessions.filter(s => s.completed).length;
+      const sessionNumber = completedSessions + 1; // Current session will be completed
+      
+      // Long break after every N sessions (default 4)
+      const longBreakInterval = userSettings.longBreakInterval || 4;
+      
+      return sessionNumber % longBreakInterval === 0 ? 'LONG' : 'SHORT';
+    } catch (error) {
+      console.error('Error calculating break type:', error);
+      return 'SHORT'; // Default fallback
     }
   };
 
@@ -209,11 +278,52 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
       console.warn('No session ID available, cannot complete session on backend');
     }
 
-    onComplete({
-      projectId: project.id,
-      durationMinutes,
-      completed: true
+    // Check if auto-breaks are enabled and start break session
+    console.log('Focus session complete - checking auto-break settings:', {
+      userSettings: userSettings,
+      autoStartBreaks: userSettings?.autoStartBreaks
     });
+    
+    // FORCE break start for testing - ignore settings for now
+    const shouldStartBreak = true; // Always start break for testing
+    
+    if (shouldStartBreak) {
+      try {
+        const breakType = await calculateNextBreakType();
+        console.log(`Starting ${breakType} break after focus session (auto-breaks: ${userSettings?.autoStartBreaks})`);
+        
+        const sessionData = {
+          projectId: project.id,
+          durationMinutes,
+          completed: true,
+          startBreak: true,
+          breakType,
+          sessionNumber: 1
+        };
+        
+        console.log('CALLING onComplete with break data:', sessionData);
+        // Pass break info to parent component
+        onComplete(sessionData);
+        console.log('onComplete called successfully with break data');
+      } catch (error) {
+        console.error('Error in break startup:', error);
+        // Fallback - complete without break
+        onComplete({
+          projectId: project.id,
+          durationMinutes,
+          completed: true
+        });
+      }
+    } else {
+      console.log('Auto-breaks disabled - completing without break');
+      const sessionData = {
+        projectId: project.id,
+        durationMinutes,
+        completed: true
+      };
+      console.log('CALLING onComplete without break data:', sessionData);
+      onComplete(sessionData);
+    }
   };
 
   const handleSkip = () => {
@@ -223,6 +333,15 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
     } else {
       handleComplete();
     }
+  };
+
+  const handleReset = () => {
+    setIsRunning(false);
+    setTimeLeft(originalTimeLeft); // Reset to the settings-based duration
+    setElapsedTime(0);
+    setSessionStartTime(null);
+    clearInterval(intervalRef.current);
+    console.log(`Timer reset to ${originalTimeLeft} seconds`);
   };
 
   const formatTime = (seconds) => {
@@ -272,12 +391,22 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
       <div className="zen-card max-w-lg w-full p-8 text-center">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-zen-800 mb-2">
-            Focusing on {project.name}
-          </h1>
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <h1 className="text-2xl font-bold text-zen-800">
+              Focusing on {project.name}
+            </h1>
+            <span className="bg-blue-100 text-blue-800 text-sm font-medium px-2 py-1 rounded-full">
+              Session {sessionNumber}
+            </span>
+          </div>
           <p className="text-zen-600">
             Stay focused and watch your plant grow 🌱
           </p>
+          {userSettings && (
+            <div className="mt-3 text-sm text-nature-600 bg-nature-50 rounded-lg px-3 py-1 inline-block">
+              Timer Setting: {userSettings.defaultFocusTime} {userSettings.defaultFocusTimeUnit}
+            </div>
+          )}
         </div>
 
         {/* Plant Animation */}
@@ -351,7 +480,10 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
               }`}
               disabled={isRunning}
             >
-              10 sec Timer (Testing)
+{userSettings ? 
+                `${userSettings.defaultFocusTime} ${userSettings.defaultFocusTimeUnit} Timer` : 
+                'Timer (Loading...)'
+              }
             </button>
             <button
               onClick={() => setSessionType('OPEN')}
@@ -443,13 +575,22 @@ const FocusSession = ({ project, onComplete, onCancel }) => {
           </button>
 
           {sessionStartTime && (
-            <button
-              onClick={handleSkip}
-              className="zen-button-secondary flex items-center gap-2 px-6 py-3"
-            >
-              <SkipForward size={20} />
-              {sessionType === 'TIMED' ? 'Skip' : 'Complete'}
-            </button>
+            <>
+              <button
+                onClick={handleReset}
+                className="zen-button-secondary flex items-center gap-2 px-6 py-3"
+              >
+                <RotateCcw size={20} />
+                Reset
+              </button>
+              <button
+                onClick={handleSkip}
+                className="zen-button-secondary flex items-center gap-2 px-6 py-3"
+              >
+                <SkipForward size={20} />
+                {sessionType === 'TIMED' ? 'Skip' : 'Complete'}
+              </button>
+            </>
           )}
         </div>
 

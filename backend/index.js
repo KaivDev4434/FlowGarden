@@ -118,6 +118,33 @@ app.get('/api/health', (req, res) => {
 });
 
 // Project endpoints
+app.get('/api/projects/:id/sessions', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { since } = req.query;
+    
+    const whereClause = {
+      projectId: id
+    };
+    
+    if (since) {
+      whereClause.createdAt = {
+        gte: new Date(since)
+      };
+    }
+    
+    const sessions = await prisma.focusSession.findMany({
+      where: whereClause,
+      orderBy: { createdAt: 'desc' }
+    });
+    
+    res.json(sessions);
+  } catch (error) {
+    console.error('Error fetching project sessions:', error);
+    res.status(500).json({ error: 'Failed to fetch project sessions' });
+  }
+});
+
 app.get('/api/projects', async (req, res) => {
   try {
     const projects = await prisma.project.findMany({
@@ -496,6 +523,224 @@ app.get('/api/analytics', async (req, res) => {
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ error: 'Something went wrong!' });
+});
+
+// Break Session endpoints
+app.post('/api/break-sessions', async (req, res) => {
+  try {
+    const { projectId, breakType, sessionNumber } = req.body;
+    
+    if (!projectId) {
+      return res.status(400).json({ error: 'Project ID is required' });
+    }
+
+    const breakSession = await prisma.breakSession.create({
+      data: {
+        projectId,
+        breakType: breakType || 'SHORT',
+        sessionNumber: sessionNumber || 1,
+        startTime: new Date()
+      },
+      include: {
+        project: true
+      }
+    });
+
+    console.log('Break session created:', breakSession);
+    res.json(breakSession);
+  } catch (error) {
+    console.error('Error creating break session:', error);
+    res.status(500).json({ error: 'Failed to create break session' });
+  }
+});
+
+app.put('/api/break-sessions/:id/complete', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { durationMinutes, completed } = req.body;
+
+    const breakSession = await prisma.breakSession.update({
+      where: { id },
+      data: {
+        endTime: new Date(),
+        durationMinutes: durationMinutes || 0,
+        completed: completed !== undefined ? completed : true
+      },
+      include: {
+        project: true
+      }
+    });
+
+    console.log('Break session completed:', breakSession);
+    res.json(breakSession);
+  } catch (error) {
+    console.error('Error completing break session:', error);
+    res.status(500).json({ error: 'Failed to complete break session' });
+  }
+});
+
+app.put('/api/break-sessions/:id/skip', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { skipped } = req.body;
+
+    const breakSession = await prisma.breakSession.update({
+      where: { id },
+      data: {
+        endTime: new Date(),
+        skipped: skipped !== undefined ? skipped : true,
+        completed: false
+      },
+      include: {
+        project: true
+      }
+    });
+
+    console.log('Break session skipped:', breakSession);
+    res.json(breakSession);
+  } catch (error) {
+    console.error('Error skipping break session:', error);
+    res.status(500).json({ error: 'Failed to skip break session' });
+  }
+});
+
+// Settings endpoints
+app.get('/api/settings', async (req, res) => {
+  try {
+    let settings = await prisma.userSettings.findFirst();
+    
+    // Create default settings if none exist
+    if (!settings) {
+      settings = await prisma.userSettings.create({
+        data: {
+          soundsEnabled: true,
+          defaultFocusTime: 10,
+          defaultFocusTimeUnit: 'seconds',
+          shortBreakTime: 2,
+          shortBreakTimeUnit: 'seconds',
+          longBreakTime: 5,
+          longBreakTimeUnit: 'seconds',
+          autoStartBreaks: true, // Enable auto-breaks by default
+          themePreference: 'zen',
+          animationsEnabled: true
+        }
+      });
+    }
+    
+    res.json(settings);
+  } catch (error) {
+    console.error('Error fetching settings:', error);
+    res.status(500).json({ error: 'Failed to fetch settings' });
+  }
+});
+
+app.put('/api/settings', async (req, res) => {
+  try {
+    const {
+      defaultFocusTime,
+      defaultFocusTimeUnit,
+      shortBreakTime,
+      shortBreakTimeUnit,
+      longBreakTime,
+      longBreakTimeUnit,
+      autoStartBreaks,
+      autoStartPomodoros,
+      shortBreaksBeforeLong,
+      maxSessionsPerDay,
+      longBreakInterval,
+      soundsEnabled,
+      notificationSounds,
+      ambientSounds,
+      volume,
+      themePreference,
+      animationsEnabled,
+      reducedMotion,
+      plantAnimationSpeed,
+      browserNotifications,
+      sessionReminders,
+      plantCareReminders,
+      autoSaveEnabled,
+      dataCollection,
+      betaFeatures
+    } = req.body;
+
+    // Find existing settings or create new
+    let settings = await prisma.userSettings.findFirst();
+    
+    if (settings) {
+      // Update existing settings - only include defined values
+      const updateData = {};
+      if (defaultFocusTime !== undefined) updateData.defaultFocusTime = defaultFocusTime;
+      if (defaultFocusTimeUnit !== undefined) updateData.defaultFocusTimeUnit = defaultFocusTimeUnit;
+      if (shortBreakTime !== undefined) updateData.shortBreakTime = shortBreakTime;
+      if (shortBreakTimeUnit !== undefined) updateData.shortBreakTimeUnit = shortBreakTimeUnit;
+      if (longBreakTime !== undefined) updateData.longBreakTime = longBreakTime;
+      if (longBreakTimeUnit !== undefined) updateData.longBreakTimeUnit = longBreakTimeUnit;
+      if (autoStartBreaks !== undefined) updateData.autoStartBreaks = autoStartBreaks;
+      if (autoStartPomodoros !== undefined) updateData.autoStartPomodoros = autoStartPomodoros;
+      if (shortBreaksBeforeLong !== undefined) updateData.shortBreaksBeforeLong = shortBreaksBeforeLong;
+      if (maxSessionsPerDay !== undefined) updateData.maxSessionsPerDay = maxSessionsPerDay;
+      if (longBreakInterval !== undefined) updateData.longBreakInterval = longBreakInterval;
+      if (soundsEnabled !== undefined) updateData.soundsEnabled = soundsEnabled;
+      if (notificationSounds !== undefined) updateData.notificationSounds = notificationSounds;
+      if (ambientSounds !== undefined) updateData.ambientSounds = ambientSounds;
+      if (volume !== undefined) updateData.volume = volume;
+      if (themePreference !== undefined) updateData.themePreference = themePreference;
+      if (animationsEnabled !== undefined) updateData.animationsEnabled = animationsEnabled;
+      if (reducedMotion !== undefined) updateData.reducedMotion = reducedMotion;
+      if (plantAnimationSpeed !== undefined) updateData.plantAnimationSpeed = plantAnimationSpeed;
+      if (browserNotifications !== undefined) updateData.browserNotifications = browserNotifications;
+      if (sessionReminders !== undefined) updateData.sessionReminders = sessionReminders;
+      if (plantCareReminders !== undefined) updateData.plantCareReminders = plantCareReminders;
+      if (autoSaveEnabled !== undefined) updateData.autoSaveEnabled = autoSaveEnabled;
+      if (dataCollection !== undefined) updateData.dataCollection = dataCollection;
+      if (betaFeatures !== undefined) updateData.betaFeatures = betaFeatures;
+
+      console.log('Updating settings with data:', updateData);
+      
+      settings = await prisma.userSettings.update({
+        where: { id: settings.id },
+        data: updateData
+      });
+    } else {
+      // Create new settings
+      settings = await prisma.userSettings.create({
+        data: {
+          defaultFocusTime,
+          defaultFocusTimeUnit,
+          shortBreakTime,
+          shortBreakTimeUnit,
+          longBreakTime,
+          longBreakTimeUnit,
+          autoStartBreaks,
+          autoStartPomodoros,
+          shortBreaksBeforeLong,
+          maxSessionsPerDay,
+          longBreakInterval,
+          soundsEnabled,
+          notificationSounds,
+          ambientSounds,
+          volume,
+          themePreference,
+          animationsEnabled,
+          reducedMotion,
+          plantAnimationSpeed,
+          browserNotifications,
+          sessionReminders,
+          plantCareReminders,
+          autoSaveEnabled,
+          dataCollection,
+          betaFeatures
+        }
+      });
+    }
+    
+    console.log('Settings updated:', settings);
+    res.json(settings);
+  } catch (error) {
+    console.error('Error updating settings:', error);
+    res.status(500).json({ error: 'Failed to update settings' });
+  }
 });
 
 // 404 handler

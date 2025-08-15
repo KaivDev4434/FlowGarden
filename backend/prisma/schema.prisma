@@ -23,6 +23,7 @@ model Project {
   
   // Relations
   focusSessions       FocusSession[]
+  breakSessions       BreakSession[]
   
   @@map("projects")
 }
@@ -35,6 +36,7 @@ model FocusSession {
   durationMinutes Int?
   sessionType     SessionType   @default(TIMED)
   completed       Boolean       @default(false)
+  sessionNumber   Int           @default(1) // Which session in the daily cycle (1, 2, 3, 4...)
   createdAt       DateTime      @default(now())
   
   // Relations
@@ -43,14 +45,66 @@ model FocusSession {
   @@map("focus_sessions")
 }
 
+model BreakSession {
+  id              String        @id @default(cuid())
+  projectId       String
+  breakType       BreakType     @default(SHORT)
+  startTime       DateTime      @default(now())
+  endTime         DateTime?
+  durationMinutes Int?
+  completed       Boolean       @default(false)
+  skipped         Boolean       @default(false)
+  sessionNumber   Int           @default(1) // Which break in the daily cycle
+  createdAt       DateTime      @default(now())
+  
+  // Relations
+  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  @@map("break_sessions")
+}
+
 model UserSettings {
-  id                  String    @id @default(cuid())
-  soundsEnabled       Boolean   @default(true)
-  defaultFocusTime    Int       @default(25) // minutes
-  themePreference     String    @default("zen")
-  animationsEnabled   Boolean   @default(true)
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  id                    String    @id @default(cuid())
+  
+  // Timer Settings (now supports flexible time units)
+  defaultFocusTime      Float     @default(10) // value
+  defaultFocusTimeUnit  String    @default("seconds") // seconds, minutes, hours
+  shortBreakTime        Float     @default(2)  // value
+  shortBreakTimeUnit    String    @default("seconds") // seconds, minutes, hours
+  longBreakTime         Float     @default(5)  // value
+  longBreakTimeUnit     String    @default("seconds") // seconds, minutes, hours
+  autoStartBreaks       Boolean   @default(true)  // Auto-start breaks by default
+  autoStartPomodoros    Boolean   @default(false)
+  
+  // Pomodoro Cycle Settings
+  shortBreaksBeforeLong Int       @default(3)  // 3 short breaks before 1 long break
+  maxSessionsPerDay     Int       @default(8)  // Maximum focus sessions per day
+  longBreakInterval     Int       @default(4)  // Long break after every 4 focus sessions
+  
+  // Sound Settings
+  soundsEnabled         Boolean   @default(true)
+  notificationSounds    Boolean   @default(true)
+  ambientSounds         Boolean   @default(true)
+  volume                Int       @default(70) // 0-100
+  
+  // Visual Settings
+  themePreference       String    @default("zen")
+  animationsEnabled     Boolean   @default(true)
+  reducedMotion         Boolean   @default(false)
+  plantAnimationSpeed   String    @default("normal") // slow, normal, fast, instant
+  
+  // Notification Settings
+  browserNotifications  Boolean   @default(true)
+  sessionReminders      Boolean   @default(true)
+  plantCareReminders    Boolean   @default(true)
+  
+  // Advanced Settings
+  autoSaveEnabled       Boolean   @default(true)
+  dataCollection        Boolean   @default(true)
+  betaFeatures          Boolean   @default(false)
+  
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
   
   @@map("user_settings")
 }
@@ -75,4 +129,9 @@ enum SessionType {
   TIMED
   OPEN
   POMODORO
+}
+
+enum BreakType {
+  SHORT
+  LONG
 }

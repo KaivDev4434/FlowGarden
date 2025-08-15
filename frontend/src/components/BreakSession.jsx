@@ -1,0 +1,484 @@
+import { useState, useEffect, useRef } from 'react';
+import { Play, Pause, SkipForward, Coffee, TreePine, RotateCcw, Square } from 'lucide-react';
+import { motion } from 'framer-motion';
+import soundService from '../services/soundService';
+
+const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHORT', sessionNumber = 1 }) => {
+  const [userSettings, setUserSettings] = useState(null);
+  const [timeLeft, setTimeLeft] = useState(300); // Default 5 minutes
+  const [originalTimeLeft, setOriginalTimeLeft] = useState(300);
+  const [isRunning, setIsRunning] = useState(false);
+  const [breakStartTime, setBreakStartTime] = useState(null);
+  const [breakId, setBreakId] = useState(null);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  
+  const intervalRef = useRef(null);
+
+  // Helper function to convert time to seconds
+  const convertToSeconds = (value, unit) => {
+    switch (unit) {
+      case 'seconds': return value;
+      case 'minutes': return value * 60;
+      case 'hours': return value * 3600;
+      default: return value * 60; // Default to minutes for backward compatibility
+    }
+  };
+
+  // Load user settings and set break duration
+  useEffect(() => {
+    const loadUserSettings = async () => {
+      try {
+        const response = await fetch('http://localhost:3001/api/settings');
+        if (response.ok) {
+          const settings = await response.json();
+          setUserSettings(settings);
+          
+          // Set break duration based on type and settings with time units
+          const breakDurationValue = breakType === 'LONG' 
+            ? (settings.longBreakTime || 5) 
+            : (settings.shortBreakTime || 2);
+          const breakDurationUnit = breakType === 'LONG'
+            ? (settings.longBreakTimeUnit || 'seconds')
+            : (settings.shortBreakTimeUnit || 'seconds');
+          
+          const timerDuration = convertToSeconds(breakDurationValue, breakDurationUnit);
+            
+          setTimeLeft(timerDuration);
+          setOriginalTimeLeft(timerDuration);
+          
+          console.log(`${breakType} break timer set to: ${timerDuration} seconds (${breakDurationValue} ${breakDurationUnit})`);
+          
+          // Auto-start break if enabled
+          if (settings.autoStartBreaks) {
+            setTimeout(() => {
+              handleStart();
+            }, 1000); // 1 second delay for user to see the break screen
+          }
+        }
+      } catch (error) {
+        console.error('Error loading user settings:', error);
+        setTimeLeft(breakType === 'LONG' ? 10 : 5); // Fallback for testing
+        setOriginalTimeLeft(breakType === 'LONG' ? 10 : 5);
+      }
+    };
+
+    loadUserSettings();
+  }, [breakType]);
+
+  // Auto-create break session when component mounts
+  useEffect(() => {
+    let isCancelled = false; // Flag to prevent race conditions
+    
+    const createBreakSession = async () => {
+      if (!breakId && !isCancelled) {
+        try {
+          console.log('Creating break session for project:', project.id, 'Type:', breakType);
+          
+          const response = await fetch('http://localhost:3001/api/break-sessions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              projectId: project.id,
+              breakType: breakType,
+              sessionNumber: sessionNumber
+            }),
+          });
+
+          if (response.ok && !isCancelled) {
+            const breakSession = await response.json();
+            setBreakId(breakSession.id);
+            console.log('Break session created:', breakSession);
+          }
+        } catch (error) {
+          if (!isCancelled) {
+            console.error('Error creating break session:', error);
+          }
+        }
+      } else if (breakId) {
+        console.log('Break session already exists, skipping creation:', breakId);
+      }
+    };
+
+    createBreakSession();
+    
+    // Cleanup function to cancel async operations
+    return () => {
+      console.log('BreakSession component unmounting, cancelling operations');
+      isCancelled = true;
+    };
+  }, []); // Empty dependency array to run only once
+
+  // Auto-start the timer when component mounts
+  useEffect(() => {
+    if (!isRunning && !breakStartTime) {
+      console.log('=== BREAK SESSION: Auto-starting timer ===');
+      handleStart();
+    }
+  }, []); // Only run once on mount
+
+  // Timer logic
+  useEffect(() => {
+    if (isRunning && timeLeft > 0) {
+      intervalRef.current = setInterval(() => {
+        setTimeLeft(prev => prev - 1);
+        setElapsedTime(prev => prev + 1);
+      }, 1000);
+    } else {
+      clearInterval(intervalRef.current);
+    }
+
+    return () => clearInterval(intervalRef.current);
+  }, [isRunning, timeLeft]);
+
+  // Handle timer completion
+  useEffect(() => {
+    if (timeLeft <= 0 && isRunning) {
+      console.log('=== BREAK TIMER COMPLETED: timeLeft reached 0 ===');
+      handleComplete();
+    }
+  }, [timeLeft, isRunning]);
+
+  const handleStart = () => {
+    setIsRunning(true);
+    if (!breakStartTime) {
+      setBreakStartTime(new Date());
+    }
+    
+    // Play start sound
+    if (userSettings?.soundsEnabled && userSettings?.notificationSounds) {
+      soundService.playBreakStart();
+    }
+  };
+
+  const handlePause = () => {
+    setIsRunning(false);
+  };
+
+  const handleComplete = async () => {
+    console.log('=== BREAK COMPLETION STARTED ===');
+    setIsRunning(false);
+    clearInterval(intervalRef.current);
+    
+    // Play completion sound
+    if (userSettings?.soundsEnabled && userSettings?.notificationSounds) {
+      soundService.playBreakComplete();
+    }
+
+    // Update break session in backend
+    if (breakId && breakStartTime) {
+      try {
+        const durationMinutes = elapsedTime / 60;
+        
+        console.log(`Completing break session ${breakId} with duration ${durationMinutes} minutes`);
+        
+        await fetch(`http://localhost:3001/api/break-sessions/${breakId}/complete`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            durationMinutes,
+            completed: true
+          }),
+        });
+        
+        console.log(`Break session completed: ${durationMinutes} minutes`);
+      } catch (error) {
+        console.error('Error completing break session:', error);
+      }
+    }
+
+    console.log('=== CALLING onComplete() to return to garden ===');
+    onComplete();
+    console.log('=== onComplete() called successfully ===');
+  };
+
+  const handleSkipBreak = () => {
+    setIsRunning(false);
+    clearInterval(intervalRef.current);
+    
+    // Mark break as skipped
+    if (breakId) {
+      fetch(`http://localhost:3001/api/break-sessions/${breakId}/skip`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          skipped: true
+        }),
+      }).catch(console.error);
+    }
+    
+    onSkip();
+  };
+
+  const handleReset = () => {
+    setIsRunning(false);
+    setTimeLeft(originalTimeLeft);
+    setElapsedTime(0);
+    setBreakStartTime(null);
+    clearInterval(intervalRef.current);
+    console.log(`Break timer reset to ${originalTimeLeft} seconds`);
+  };
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getBreakIcon = () => {
+    return breakType === 'LONG' ? <TreePine size={48} /> : <Coffee size={48} />;
+  };
+
+  const getBreakColor = () => {
+    return breakType === 'LONG' ? 'from-blue-400 to-purple-500' : 'from-orange-400 to-yellow-500';
+  };
+
+  const getBreakDescription = () => {
+    return breakType === 'LONG' 
+      ? 'Take a longer break, stretch, walk around, or do something refreshing!'
+      : 'Take a short break, hydrate, breathe, or look away from the screen!';
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-6 overflow-hidden">
+      {/* Background ambient animation */}
+      <div className="absolute inset-0 overflow-hidden">
+        {/* Floating particles */}
+        {[...Array(12)].map((_, i) => (
+          <motion.div
+            key={i}
+            className="absolute w-2 h-2 bg-blue-200 rounded-full opacity-30"
+            animate={{
+              x: [Math.random() * window.innerWidth, Math.random() * window.innerWidth],
+              y: [Math.random() * window.innerHeight, Math.random() * window.innerHeight],
+            }}
+            transition={{
+              duration: 20 + Math.random() * 10,
+              repeat: Infinity,
+              ease: "linear"
+            }}
+            style={{
+              left: Math.random() * 100 + '%',
+              top: Math.random() * 100 + '%',
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Main content */}
+      <div className="relative z-10 text-center max-w-2xl mx-auto">
+        {/* Header */}
+        <motion.div 
+          className="mb-12"
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 1 }}
+        >
+          <div className="flex items-center justify-center gap-3 mb-3">
+            <h1 className="text-3xl font-light text-blue-800">
+              {breakType === 'LONG' ? 'Take a Deep Break' : 'Breathe & Relax'}
+            </h1>
+            <span className="bg-blue-200 text-blue-800 text-sm font-medium px-3 py-1 rounded-full">
+              After Session {sessionNumber}
+            </span>
+          </div>
+          <p className="text-blue-600 text-lg font-light">
+            {getBreakDescription()}
+          </p>
+        </motion.div>
+
+        {/* Central animated circle with timer */}
+        <div className="relative mb-12 flex items-center justify-center">
+          {/* Radiating rings */}
+          <motion.div
+            className="absolute w-96 h-96 rounded-full border-2 border-blue-300 opacity-20"
+            animate={{
+              scale: [1, 1.3, 1],
+              opacity: [0.2, 0, 0.2],
+            }}
+            transition={{
+              duration: 3,
+              repeat: Infinity,
+              ease: "easeInOut"
+            }}
+          />
+          <motion.div
+            className="absolute w-80 h-80 rounded-full border-2 border-blue-400 opacity-30"
+            animate={{
+              scale: [1, 1.2, 1],
+              opacity: [0.3, 0, 0.3],
+            }}
+            transition={{
+              duration: 2.5,
+              repeat: Infinity,
+              ease: "easeInOut",
+              delay: 0.5
+            }}
+          />
+          <motion.div
+            className="absolute w-64 h-64 rounded-full border border-blue-500 opacity-40"
+            animate={{
+              scale: [1, 1.1, 1],
+              opacity: [0.4, 0, 0.4],
+            }}
+            transition={{
+              duration: 2,
+              repeat: Infinity,
+              ease: "easeInOut",
+              delay: 1
+            }}
+          />
+
+          {/* Main blue circle with timer */}
+          <motion.div
+            className="relative w-48 h-48 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 shadow-2xl flex items-center justify-center"
+            animate={isRunning ? {
+              scale: [1, 1.02, 1],
+              boxShadow: [
+                "0 25px 50px -12px rgba(59, 130, 246, 0.5)",
+                "0 25px 50px -12px rgba(59, 130, 246, 0.8)",
+                "0 25px 50px -12px rgba(59, 130, 246, 0.5)"
+              ]
+            } : {}}
+            transition={{ duration: 2, repeat: Infinity }}
+          >
+            {/* Progress ring */}
+            <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 100 100">
+              <circle
+                cx="50"
+                cy="50"
+                r="46"
+                fill="none"
+                stroke="rgba(255,255,255,0.2)"
+                strokeWidth="2"
+              />
+              <motion.circle
+                cx="50"
+                cy="50"
+                r="46"
+                fill="none"
+                stroke="rgba(255,255,255,0.8)"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeDasharray={2 * Math.PI * 46}
+                strokeDashoffset={2 * Math.PI * 46 * (timeLeft / originalTimeLeft)}
+                transition={{ duration: 0.3 }}
+              />
+            </svg>
+
+            {/* Timer display */}
+            <div className="text-center text-white">
+              <motion.div
+                className="text-3xl font-light mb-1"
+                animate={isRunning ? { scale: [1, 1.05, 1] } : {}}
+                transition={{ duration: 1, repeat: Infinity }}
+              >
+                {formatTime(timeLeft)}
+              </motion.div>
+              <div className="text-xs opacity-80 uppercase tracking-wide">
+                {breakType === 'LONG' ? 'Long Break' : 'Short Break'}
+              </div>
+            </div>
+          </motion.div>
+        </div>
+
+        {/* Session info */}
+        {userSettings && (
+          <motion.div 
+            className="mb-8 text-blue-700"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5 }}
+          >
+            <div className="text-sm opacity-80">
+              Session {sessionNumber} • {breakType === 'LONG' 
+                ? `${userSettings.longBreakTime} ${userSettings.longBreakTimeUnit} break` 
+                : `${userSettings.shortBreakTime} ${userSettings.shortBreakTimeUnit} break`}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Minimal controls */}
+        <motion.div 
+          className="flex justify-center gap-6 mb-8"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 1 }}
+        >
+          <button
+            onClick={isRunning ? handlePause : handleStart}
+            className="w-14 h-14 rounded-full bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center text-blue-700 hover:bg-white/30 transition-all duration-300 group"
+          >
+            {isRunning ? (
+              <Pause size={20} className="group-hover:scale-110 transition-transform" />
+            ) : (
+              <Play size={20} className="ml-1 group-hover:scale-110 transition-transform" />
+            )}
+          </button>
+
+          {breakStartTime && (
+            <>
+              <button
+                onClick={handleReset}
+                className="w-14 h-14 rounded-full bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center text-blue-700 hover:bg-white/30 transition-all duration-300 group"
+              >
+                <RotateCcw size={18} className="group-hover:scale-110 transition-transform" />
+              </button>
+              
+              <button
+                onClick={handleSkipBreak}
+                className="w-14 h-14 rounded-full bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center text-blue-700 hover:bg-white/30 transition-all duration-300 group"
+              >
+                <SkipForward size={18} className="group-hover:scale-110 transition-transform" />
+              </button>
+            </>
+          )}
+        </motion.div>
+
+        {/* Breathing guide and next session info */}
+        <motion.div 
+          className="text-center"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1.5 }}
+        >
+          {isRunning ? (
+            <div className="space-y-4">
+              <div className="text-blue-600 text-sm font-light">
+                <motion.div
+                  animate={{ scale: [1, 1.1, 1] }}
+                  transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                >
+                  Breathe in... and out...
+                </motion.div>
+              </div>
+              <div className="text-blue-500 text-xs opacity-70">
+                Next: Focus Session {sessionNumber + 1}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="text-blue-600 text-sm font-medium">
+                🎯 Ready for Focus Session {sessionNumber + 1}
+              </div>
+              <button
+                onClick={onCancel}
+                className="text-blue-500 hover:text-blue-700 transition-colors text-sm flex items-center gap-2 mx-auto opacity-60 hover:opacity-100"
+              >
+                <Square size={14} />
+                Exit Pomodoro Cycle
+              </button>
+            </div>
+          )}
+        </motion.div>
+      </div>
+    </div>
+  );
+};
+
+export default BreakSession;
