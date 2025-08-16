@@ -6,8 +6,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install dependencies (no lockfile required)
+RUN npm install
 
 # Copy source code
 COPY . .
@@ -31,7 +31,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/index.js ./
-COPY --from=builder /app/.env ./.env
+# Do not copy .env; use environment variables from runtime / compose
 
 # Create data directory
 RUN mkdir -p /app/data
