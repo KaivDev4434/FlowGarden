@@ -18,12 +18,12 @@ import {
 const Settings = ({ onBack }) => {
   const [settings, setSettings] = useState({
     // Timer Settings (with time units)
-    defaultFocusTime: 10,
-    defaultFocusTimeUnit: 'seconds',
-    shortBreakTime: 2,
-    shortBreakTimeUnit: 'seconds', 
-    longBreakTime: 5,
-    longBreakTimeUnit: 'seconds',
+    defaultFocusTime: 25,
+    defaultFocusTimeUnit: 'minutes',
+    shortBreakTime: 5,
+    shortBreakTimeUnit: 'minutes', 
+    longBreakTime: 15,
+    longBreakTimeUnit: 'minutes',
     autoStartBreaks: true,
     autoStartPomodoros: false,
     
@@ -93,8 +93,6 @@ const Settings = ({ onBack }) => {
   const saveSettings = async () => {
     setSaving(true);
     try {
-      console.log('=== Settings: Saving settings:', settings);
-      console.log('=== Settings: clockFormat being saved:', settings.clockFormat);
       
       const response = await fetch('http://localhost:3001/api/settings', {
         method: 'PUT',
@@ -106,10 +104,9 @@ const Settings = ({ onBack }) => {
 
       if (response.ok) {
         const savedSettings = await response.json();
-        console.log('=== Settings: Backend response:', savedSettings);
         setOriginalSettings(settings);
         setHasChanges(false);
-        console.log('Settings saved successfully');
+        
       }
     } catch (error) {
       console.error('Error saving settings:', error);
@@ -124,12 +121,12 @@ const Settings = ({ onBack }) => {
 
   const resetToDefaults = () => {
     const defaultSettings = {
-      defaultFocusTime: 10,
-      defaultFocusTimeUnit: 'seconds',
-      shortBreakTime: 2,
-      shortBreakTimeUnit: 'seconds',
-      longBreakTime: 5, 
-      longBreakTimeUnit: 'seconds',
+      defaultFocusTime: 25,
+      defaultFocusTimeUnit: 'minutes',
+      shortBreakTime: 5,
+      shortBreakTimeUnit: 'minutes',
+      longBreakTime: 15, 
+      longBreakTimeUnit: 'minutes',
       autoStartBreaks: true,
       autoStartPomodoros: false,
       shortBreaksBeforeLong: 3,

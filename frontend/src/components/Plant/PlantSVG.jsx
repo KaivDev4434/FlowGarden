@@ -19,8 +19,6 @@ const PlantSVG = forwardRef(({ health = 30, plantType = 'generic', className = '
       const stage = plantInstance.calculateStage(health);
       plantInstance.animateToStage(stage);
       
-      console.log(`Plant initialized: type=${plantType}, health=${health}, stage=${stage}`);
-      
       // Forward the plant instance to parent if ref is provided
       if (ref) {
         ref.current = plantInstance;

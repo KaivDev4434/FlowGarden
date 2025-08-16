@@ -6,11 +6,11 @@ import { PlantFactory } from '../plants/PlantFactory';
 import { PlantAnimationManager } from '../animations/plantAnimations';
 
 const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refreshSettings = false, autoStart = false }) => {
-  console.log('FocusSession rendered with project:', project);
+  
   
   const [userSettings, setUserSettings] = useState(null);
-  const [timeLeft, setTimeLeft] = useState(10); // Will be updated from settings
-  const [originalTimeLeft, setOriginalTimeLeft] = useState(10); // Store original duration
+  const [timeLeft, setTimeLeft] = useState(1500); // 25 minutes default
+  const [originalTimeLeft, setOriginalTimeLeft] = useState(1500);
   const [isRunning, setIsRunning] = useState(false);
   const [sessionType, setSessionType] = useState('TIMED');
   const [sessionStartTime, setSessionStartTime] = useState(null);
@@ -99,8 +99,6 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
           
           setTimeLeft(timerDuration);
           setOriginalTimeLeft(timerDuration);
-          console.log('Loaded user settings:', settings);
-          console.log(`Focus timer set to: ${timerDuration} seconds (${focusTimeValue} ${focusTimeUnit})`);
         }
       } catch (error) {
         console.error('Error loading user settings:', error);
@@ -125,7 +123,6 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
     const createSession = async () => {
       if (!sessionCreated && !sessionId) {
         try {
-          console.log('Creating session for project:', project.id);
           const response = await fetch('http://localhost:3001/api/sessions/start', {
             method: 'POST',
             headers: {
@@ -139,7 +136,6 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
           
           if (response.ok) {
             const sessionData = await response.json();
-            console.log('Session created:', sessionData);
             setSessionId(sessionData.id);
             setSessionStartTime(new Date());
             setSessionCreated(true);
@@ -175,7 +171,6 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
   // Handle timer completion
   useEffect(() => {
     if (timeLeft <= 0 && sessionType === 'TIMED' && isRunning) {
-      console.log('=== TIMER COMPLETED: timeLeft reached 0 ===');
       handleComplete();
     }
   }, [timeLeft, sessionType, isRunning]);
@@ -246,7 +241,6 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
     clearInterval(intervalRef.current);
 
     const durationMinutes = Math.floor(elapsedTime / 60);
-    console.log('Completing session:', { sessionId, durationMinutes, elapsedTime });
     
     // Play completion sounds
     soundService.playSessionComplete();
@@ -259,7 +253,6 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
     // Complete session on backend
     if (sessionId) {
       try {
-        console.log('Sending completion request for session:', sessionId);
         const response = await fetch(`http://localhost:3001/api/sessions/${sessionId}/complete`, {
           method: 'PUT',
           headers: {
@@ -271,8 +264,7 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
         });
         
         if (response.ok) {
-          const result = await response.json();
-          console.log('Session completed successfully:', result);
+          await response.json();
         } else {
           console.error('Failed to complete session:', response.status, response.statusText);
           const errorText = await response.text();
@@ -289,7 +281,6 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
     // based on the user setting `autoStartBreaks`.
     try {
       const breakType = await calculateNextBreakType();
-      console.log(`Navigating to ${breakType} break after focus session`);
       
       const sessionData = {
         projectId: project.id,
@@ -299,10 +290,8 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
         breakType,
         sessionNumber
       };
-      
-      console.log('CALLING onComplete with break data:', sessionData);
       onComplete(sessionData);
-      console.log('onComplete called successfully with break data');
+      
     } catch (error) {
       console.error('Error preparing break session:', error);
       // As a fallback, still navigate to a short break screen
@@ -332,7 +321,6 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
     setElapsedTime(0);
     setSessionStartTime(null);
     clearInterval(intervalRef.current);
-    console.log(`Timer reset to ${originalTimeLeft} seconds`);
   };
 
   const formatTime = (seconds) => {
@@ -343,7 +331,7 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
 
   const getProgress = () => {
     if (sessionType === 'TIMED') {
-      const totalTime = 10; // 10 seconds for testing (was 25 * 60)
+      const totalTime = originalTimeLeft || 1;
       return ((totalTime - timeLeft) / totalTime) * 100;
     } else {
       // For open sessions, show a gentle pulse

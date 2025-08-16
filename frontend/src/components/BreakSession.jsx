@@ -38,15 +38,15 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
             ? (settings.longBreakTime || 5) 
             : (settings.shortBreakTime || 2);
           const breakDurationUnit = breakType === 'LONG'
-            ? (settings.longBreakTimeUnit || 'seconds')
-            : (settings.shortBreakTimeUnit || 'seconds');
+            ? (settings.longBreakTimeUnit || 'minutes')
+            : (settings.shortBreakTimeUnit || 'minutes');
           
           const timerDuration = convertToSeconds(breakDurationValue, breakDurationUnit);
             
           setTimeLeft(timerDuration);
           setOriginalTimeLeft(timerDuration);
           
-          console.log(`${breakType} break timer set to: ${timerDuration} seconds (${breakDurationValue} ${breakDurationUnit})`);
+          
           
           // Auto-start break if enabled
           if (settings.autoStartBreaks) {
@@ -57,8 +57,8 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
         }
       } catch (error) {
         console.error('Error loading user settings:', error);
-        setTimeLeft(breakType === 'LONG' ? 10 : 5); // Fallback for testing
-        setOriginalTimeLeft(breakType === 'LONG' ? 10 : 5);
+        setTimeLeft(breakType === 'LONG' ? 900 : 300);
+        setOriginalTimeLeft(breakType === 'LONG' ? 900 : 300);
       }
     };
 
@@ -72,7 +72,7 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
     const createBreakSession = async () => {
       if (!breakId && !isCancelled) {
         try {
-          console.log('Creating break session for project:', project.id, 'Type:', breakType);
+          
           
           const response = await fetch('http://localhost:3001/api/break-sessions', {
             method: 'POST',
@@ -89,7 +89,6 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
           if (response.ok && !isCancelled) {
             const breakSession = await response.json();
             setBreakId(breakSession.id);
-            console.log('Break session created:', breakSession);
           }
         } catch (error) {
           if (!isCancelled) {
@@ -97,7 +96,6 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
           }
         }
       } else if (breakId) {
-        console.log('Break session already exists, skipping creation:', breakId);
       }
     };
 
@@ -105,7 +103,6 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
     
     // Cleanup function to cancel async operations
     return () => {
-      console.log('BreakSession component unmounting, cancelling operations');
       isCancelled = true;
     };
   }, []); // Empty dependency array to run only once
@@ -130,7 +127,6 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
   // Handle timer completion
   useEffect(() => {
     if (timeLeft <= 0 && isRunning) {
-      console.log('=== BREAK TIMER COMPLETED: timeLeft reached 0 ===');
       handleComplete();
     }
   }, [timeLeft, isRunning]);
@@ -152,7 +148,7 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
   };
 
   const handleComplete = async () => {
-    console.log('=== BREAK COMPLETION STARTED ===');
+    
     setIsRunning(false);
     clearInterval(intervalRef.current);
     
@@ -166,8 +162,6 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
       try {
         const durationMinutes = elapsedTime / 60;
         
-        console.log(`Completing break session ${breakId} with duration ${durationMinutes} minutes`);
-        
         await fetch(`http://localhost:3001/api/break-sessions/${breakId}/complete`, {
           method: 'PUT',
           headers: {
@@ -179,15 +173,14 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
           }),
         });
         
-        console.log(`Break session completed: ${durationMinutes} minutes`);
+        
       } catch (error) {
         console.error('Error completing break session:', error);
       }
     }
 
-    console.log('=== CALLING onComplete() to return to garden ===');
     onComplete();
-    console.log('=== onComplete() called successfully ===');
+    
   };
 
   const handleSkipBreak = () => {
@@ -216,7 +209,7 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
     setElapsedTime(0);
     setBreakStartTime(null);
     clearInterval(intervalRef.current);
-    console.log(`Break timer reset to ${originalTimeLeft} seconds`);
+    
   };
 
   const formatTime = (seconds) => {

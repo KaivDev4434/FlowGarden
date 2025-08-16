@@ -13,30 +13,14 @@ app.use(express.json());
 
 // Health calculation functions
 function calculateHealthFromFocusTime(totalMinutes, daysSinceLastSession = 0) {
-  // Start at 30% health
+  // Base health
   let health = 30;
-  
-  // For testing: Any session (even seconds) gives health boost
-  // In testing mode (sessions < 1 minute), each session gives 5% boost
-  if (totalMinutes < 1) {
-    // Count sessions by checking total seconds - each 10+ second session = 5% health
-    const totalSeconds = totalMinutes * 60;
-    const sessionCount = Math.floor(totalSeconds / 10); // Each 10-second chunk = 1 session
-    const testingBonus = Math.min(70, sessionCount * 5); // 5% per session, max 70%
-    health += testingBonus;
-    console.log(`Testing mode: ${totalSeconds}s = ${sessionCount} sessions = +${testingBonus}% health`);
-  } else {
-    // Production mode: Every 25 minutes of focus adds 10% health (up to 100%)
-    const focusBonus = Math.min(70, Math.floor(totalMinutes / 25) * 10);
-    health += focusBonus;
-    console.log(`Production mode: ${totalMinutes}min = +${focusBonus}% health`);
-  }
-  
+  // Every 25 minutes of focus adds 10% health (up to +70%)
+  const focusBonus = Math.min(70, Math.floor(totalMinutes / 25) * 10);
+  health += focusBonus;
   // Decrease health for consecutive days without focus
   const decayPenalty = daysSinceLastSession * 10;
   health -= decayPenalty;
-  
-  // Ensure health stays within bounds
   return Math.max(0, Math.min(100, health));
 }
 
@@ -101,7 +85,7 @@ async function updatePlantHealth() {
           }
         });
         
-        console.log(`Updated ${project.name}: health ${project.health} -> ${newHealth}`);
+        // updated project health silently
       }
     }
   } catch (error) {
@@ -309,7 +293,7 @@ app.put('/api/sessions/:id/complete', async (req, res) => {
     const { id } = req.params;
     const { durationMinutes } = req.body;
     
-    console.log(`Completing session ${id} with duration ${durationMinutes} minutes`);
+    // Completing session
 
     const session = await prisma.focusSession.update({
       where: { id },
@@ -323,7 +307,7 @@ app.put('/api/sessions/:id/complete', async (req, res) => {
       }
     });
     
-    console.log('Session updated:', session);
+    // Session updated
 
     // Recalculate health based on completed sessions
     const allSessions = await prisma.focusSession.findMany({
@@ -337,30 +321,11 @@ app.put('/api/sessions/:id/complete', async (req, res) => {
       (total, s) => total + (s.durationMinutes || 0),
       0
     );
-    
-    // For testing: Give immediate +10% health for any completed session
-    const currentHealth = session.project.health;
-    const sessionBonus = 10; // 10% per completed session for testing
-    const newHealthFromSession = Math.min(100, currentHealth + sessionBonus);
-    
-    // Also use the formula-based approach
-    const daysSinceCreation = getDaysSinceDate(session.project.createdAt);
     const formulaHealth = calculateHealthFromFocusTime(totalFocusMinutes, 0);
-    
-    // Use the higher of the two approaches
-    const newHealth = Math.max(newHealthFromSession, formulaHealth);
+    const newHealth = formulaHealth;
     const newGrowthStage = calculateGrowthStage(newHealth);
     
-    console.log('Health calculation:', {
-      totalSessions: allSessions.length,
-      totalFocusMinutes,
-      currentHealth,
-      sessionBonus: `+${sessionBonus}%`,
-      newHealthFromSession,
-      formulaHealth,
-      finalNewHealth: newHealth,
-      newGrowthStage
-    });
+    // Health calculation
     
     // If a full session was completed (25+ minutes), trigger blooming
     const triggerBlooming = durationMinutes >= 25;
@@ -375,13 +340,7 @@ app.put('/api/sessions/:id/complete', async (req, res) => {
       }
     });
     
-    console.log('Project health updated:', {
-      oldHealth: session.project.health,
-      newHealth: bloomingHealth,
-      healthIncrease: `+${bloomingHealth - session.project.health}%`,
-      oldGrowthStage: session.project.growthStage,
-      newGrowthStage: triggerBlooming ? 5 : newGrowthStage
-    });
+    // Project health updated
     
     // Return session with updated project data
     const updatedSession = await prisma.focusSession.findUnique({
@@ -570,7 +529,7 @@ app.post('/api/break-sessions', async (req, res) => {
       }
     });
 
-    console.log('Break session created:', breakSession);
+    // break session created
     res.json(breakSession);
   } catch (error) {
     console.error('Error creating break session:', error);
@@ -595,7 +554,7 @@ app.put('/api/break-sessions/:id/complete', async (req, res) => {
       }
     });
 
-    console.log('Break session completed:', breakSession);
+    // break session completed
     res.json(breakSession);
   } catch (error) {
     console.error('Error completing break session:', error);
@@ -620,7 +579,7 @@ app.put('/api/break-sessions/:id/skip', async (req, res) => {
       }
     });
 
-    console.log('Break session skipped:', breakSession);
+    // break session skipped
     res.json(breakSession);
   } catch (error) {
     console.error('Error skipping break session:', error);
@@ -638,12 +597,12 @@ app.get('/api/settings', async (req, res) => {
       settings = await prisma.userSettings.create({
         data: {
           soundsEnabled: true,
-          defaultFocusTime: 10,
-          defaultFocusTimeUnit: 'seconds',
-          shortBreakTime: 2,
-          shortBreakTimeUnit: 'seconds',
-          longBreakTime: 5,
-          longBreakTimeUnit: 'seconds',
+          defaultFocusTime: 25,
+          defaultFocusTimeUnit: 'minutes',
+          shortBreakTime: 5,
+          shortBreakTimeUnit: 'minutes',
+          longBreakTime: 15,
+          longBreakTimeUnit: 'minutes',
           autoStartBreaks: true, // Enable auto-breaks by default
           themePreference: 'zen',
           animationsEnabled: true,
@@ -723,9 +682,7 @@ app.put('/api/settings', async (req, res) => {
       if (dataCollection !== undefined) updateData.dataCollection = dataCollection;
       if (betaFeatures !== undefined) updateData.betaFeatures = betaFeatures;
 
-      console.log('Updating settings with data:', updateData);
-    console.log('clockFormat from request:', clockFormat);
-    console.log('clockFormat in updateData:', updateData.clockFormat);
+      // updating settings
       
       settings = await prisma.userSettings.update({
         where: { id: settings.id },
@@ -765,7 +722,7 @@ app.put('/api/settings', async (req, res) => {
       });
     }
     
-    console.log('Settings updated:', settings);
+    // settings updated
     res.json(settings);
   } catch (error) {
     console.error('Error updating settings:', error);

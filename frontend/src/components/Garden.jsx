@@ -24,10 +24,8 @@ const Garden = () => {
   });
   const [autoStartNextFocus, setAutoStartNextFocus] = useState(false);
 
-  // Debug settings changes
-  useEffect(() => {
-    console.log('=== Settings state changed:', settings);
-  }, [settings]);
+  // Settings changes effect (no debug)
+  useEffect(() => {}, [settings]);
 
   // Update clock every minute
   useEffect(() => {
@@ -65,13 +63,11 @@ const Garden = () => {
       const response = await fetch('http://localhost:3001/api/settings');
       if (response.ok) {
         const userSettings = await response.json();
-        console.log('=== fetchSettings: Received settings:', userSettings);
         setSettings(prev => {
           const newSettings = {
             ...prev,
             ...userSettings
           };
-          console.log('=== fetchSettings: Updated settings state:', newSettings);
           return newSettings;
         });
       }
@@ -146,12 +142,9 @@ const Garden = () => {
   };
 
   const handleFocusStart = (projectId) => {
-    console.log('Starting focus session for project:', projectId);
     const project = projects.find(p => p.id === projectId);
-    console.log('Found project:', project);
     if (project) {
       setActiveFocusSession(project);
-      console.log('Set active focus session:', project);
     } else {
       console.error('Project not found for ID:', projectId);
     }
@@ -181,16 +174,11 @@ const Garden = () => {
   };
 
   const handleFocusComplete = async (sessionData) => {
-    console.log('=== GARDEN: Focus session completed ===');
-    console.log('Session data received:', sessionData);
-    console.log('Should start break?', sessionData.startBreak);
-    console.log('Break type:', sessionData.breakType);
-    console.log('Active focus session:', activeFocusSession);
     
     // Increment Pomodoro session count
     const newSessionCount = pomodoroSessionCount + 1;
     setPomodoroSessionCount(newSessionCount);
-    console.log(`=== POMODORO: Completed session ${newSessionCount} ===`);
+    
     
     // Session is already completed by FocusSession component
     // Just refresh projects to get updated health data
@@ -198,24 +186,19 @@ const Garden = () => {
     
     // Check if we should start a break session
     if (sessionData.startBreak) {
-      console.log(`=== GARDEN: Starting ${sessionData.breakType} break session ===`);
       
       const breakSessionData = {
         project: activeFocusSession, // This contains the project data
         breakType: sessionData.breakType,
         sessionNumber: newSessionCount
       };
-      
-      console.log('Break session data:', breakSessionData);
       setActiveBreakSession(breakSessionData);
-      console.log('activeBreakSession state set');
     } else {
       // If auto-breaks are disabled or no break triggered
       if (sessionData.autoBreaksDisabled) {
-        console.log('=== GARDEN: Auto-breaks disabled - returning to garden, resetting session count ===');
         setPomodoroSessionCount(0); // Reset when auto-breaks are off
       } else {
-        console.log('=== GARDEN: Focus session completed - no auto-break configured ===');
+        
       }
     }
     
@@ -223,13 +206,11 @@ const Garden = () => {
     
     // Show celebration message for significant progress
     if (sessionData.durationMinutes >= 1) {
-      console.log('🌱 Great focus session! Your plant is growing!');
+      
     }
   };
 
   const handleBreakComplete = async () => {
-    console.log('=== GARDEN: Break session completed ===');
-    console.log('Current activeBreakSession before clearing:', activeBreakSession);
     
     // Capture the project to resume before clearing state
     const projectToResume = activeBreakSession?.project;
@@ -241,7 +222,6 @@ const Garden = () => {
       if (response.ok) {
         const settings = await response.json();
         shouldAutoStartNextSession = settings.autoStartPomodoros === true;
-        console.log('=== GARDEN: autoStartPomodoros setting:', shouldAutoStartNextSession);
       }
     } catch (error) {
       console.error('Error fetching settings for break completion:', error);
@@ -253,15 +233,12 @@ const Garden = () => {
       
       if (projectToResume) {
         if (shouldAutoStartNextSession) {
-          console.log('=== GARDEN: Auto-starting next focus session (autoStartPomodoros enabled) ===');
           setAutoStartNextFocus(true);
         } else {
-          console.log('=== GARDEN: Navigating to focus session (autoStartPomodoros disabled) ===');
           setAutoStartNextFocus(false);
         }
         setActiveFocusSession(projectToResume);
       } else {
-        console.log('=== GARDEN: Returning to garden (no project to resume) ===');
         setActiveFocusSession(null);
         fetchProjects();
         // Reset session count when returning to garden
@@ -271,17 +248,14 @@ const Garden = () => {
   };
 
   const handleBreakSkip = () => {
-    console.log('Break session skipped in Garden');
     setActiveBreakSession(null);
     // When break is skipped, continue the cycle with next focus session
     if (activeBreakSession?.project) {
-      console.log('=== GARDEN: Break skipped, starting next focus session ===');
       setActiveFocusSession(activeBreakSession.project);
     }
   };
 
   const handleExitPomodoroCycle = () => {
-    console.log('=== POMODORO: Exiting cycle, returning to garden ===');
     setActiveFocusSession(null);
     setActiveBreakSession(null);
     setPomodoroSessionCount(0);
@@ -289,13 +263,11 @@ const Garden = () => {
   };
 
   const formatTime = (date) => {
-    console.log('=== formatTime called with clockFormat:', settings.clockFormat, 'hour12 will be:', settings.clockFormat === '12h');
     const result = date.toLocaleTimeString([], { 
       hour: '2-digit', 
       minute: '2-digit',
       hour12: settings.clockFormat === '12h'
     });
-    console.log('=== formatTime result:', result);
     return result;
   };
 
@@ -312,10 +284,10 @@ const Garden = () => {
 
   // If there's an active focus session, show the focus view
   // If break session is active, show break session
-  console.log('=== GARDEN RENDER: Checking activeBreakSession ===', activeBreakSession);
+  // render checks
   
   if (activeBreakSession) {
-    console.log('=== GARDEN RENDER: Rendering BreakSession ===');
+    
     return (
       <BreakSession
         project={activeBreakSession.project}
@@ -356,14 +328,11 @@ const Garden = () => {
         // Refresh projects and settings to get any updated settings effects
         await fetchProjects();
         await fetchSettings();
-        console.log('=== Settings back handler: Settings refreshed');
       }} />
     );
   }
 
-  console.log('=== GARDEN RENDER: Rendering main garden view ===');
-  console.log('=== GARDEN RENDER: Current settings:', settings);
-  console.log('=== GARDEN RENDER: Current clockFormat:', settings.clockFormat);
+  
   
   return (
     <div className="min-h-screen p-6">

@@ -30,8 +30,6 @@ const PlantController = ({ plant, onPlantClick }) => {
     const previousStage = getGrowthStage(previousHealth.current);
     
     if (currentStage !== previousStage) {
-      console.log(`Plant transitioning from ${previousStage} to ${currentStage} (health: ${plant.health})`);
-      
       // Use the plant instance's animation methods
       plantInstanceRef.current.animateToStage(currentStage);
     }
