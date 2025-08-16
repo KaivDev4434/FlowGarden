@@ -44,7 +44,7 @@ const Garden = () => {
 
   const fetchProjects = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/projects');
+      const response = await fetch('/api/projects');
       if (response.ok) {
         const data = await response.json();
         setProjects(data);
@@ -60,7 +60,7 @@ const Garden = () => {
 
   const fetchSettings = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/settings');
+      const response = await fetch('/api/settings');
       if (response.ok) {
         const userSettings = await response.json();
         setSettings(prev => {
@@ -78,7 +78,7 @@ const Garden = () => {
 
   const handleCreateProject = async (projectData) => {
     try {
-      const response = await fetch('http://localhost:3001/api/projects', {
+      const response = await fetch('/api/projects', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -100,7 +100,7 @@ const Garden = () => {
 
   const handleEditProject = async (projectId, updates) => {
     try {
-      const response = await fetch(`http://localhost:3001/api/projects/${projectId}`, {
+      const response = await fetch(`/api/projects/${projectId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -152,7 +152,7 @@ const Garden = () => {
 
   const handleWaterPlant = async (plantId) => {
     try {
-      const response = await fetch(`http://localhost:3001/api/projects/${plantId}`, {
+      const response = await fetch(`/api/projects/${plantId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -218,7 +218,7 @@ const Garden = () => {
     // Check user settings for auto-start pomodoros
     let shouldAutoStartNextSession = false;
     try {
-      const response = await fetch('http://localhost:3001/api/settings');
+      const response = await fetch('/api/settings');
       if (response.ok) {
         const settings = await response.json();
         shouldAutoStartNextSession = settings.autoStartPomodoros === true;

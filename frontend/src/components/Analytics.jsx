@@ -41,7 +41,7 @@ const Analytics = ({ onBack }) => {
 
   const fetchAnalytics = async () => {
     try {
-      const response = await fetch(`http://localhost:3001/api/analytics?days=${days}`);
+      const response = await fetch(`/api/analytics?days=${days}`);
       if (response.ok) {
         const data = await response.json();
         setAnalytics(data);

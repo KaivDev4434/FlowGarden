@@ -87,7 +87,7 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
   useEffect(() => {
     const loadUserSettings = async () => {
       try {
-        const response = await fetch('http://localhost:3001/api/settings');
+        const response = await fetch('/api/settings');
         if (response.ok) {
           const settings = await response.json();
           setUserSettings(settings);
@@ -123,7 +123,7 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
     const createSession = async () => {
       if (!sessionCreated && !sessionId) {
         try {
-          const response = await fetch('http://localhost:3001/api/sessions/start', {
+          const response = await fetch('/api/sessions/start', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -187,7 +187,7 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
         
         // Start focus session on backend
         try {
-          const response = await fetch('http://localhost:3001/api/sessions/start', {
+          const response = await fetch('/api/sessions/start', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -220,7 +220,7 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       
-      const response = await fetch(`http://localhost:3001/api/projects/${project.id}/sessions?since=${today.toISOString()}`);
+      const response = await fetch(`/api/projects/${project.id}/sessions?since=${today.toISOString()}`);
       const sessions = response.ok ? await response.json() : [];
       
       const completedSessions = sessions.filter(s => s.completed).length;
@@ -253,7 +253,7 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
     // Complete session on backend
     if (sessionId) {
       try {
-        const response = await fetch(`http://localhost:3001/api/sessions/${sessionId}/complete`, {
+        const response = await fetch(`/api/sessions/${sessionId}/complete`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',

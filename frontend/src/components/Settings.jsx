@@ -73,7 +73,7 @@ const Settings = ({ onBack }) => {
 
   const loadSettings = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/settings');
+      const response = await fetch('/api/settings');
       if (response.ok) {
         const userSettings = await response.json();
         setSettings(prev => ({
@@ -94,7 +94,7 @@ const Settings = ({ onBack }) => {
     setSaving(true);
     try {
       
-      const response = await fetch('http://localhost:3001/api/settings', {
+      const response = await fetch('/api/settings', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

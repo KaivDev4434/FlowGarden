@@ -26,7 +26,7 @@ const ProjectAnalytics = ({ project, onBack }) => {
       setLoading(true);
       const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
       try {
-        const res = await fetch(`http://localhost:3001/api/projects/${project.id}/sessions?since=${since}`);
+        const res = await fetch(`/api/projects/${project.id}/sessions?since=${since}`);
         if (res.ok) {
           const data = await res.json();
           setSessions(data.filter(s => s.completed));
