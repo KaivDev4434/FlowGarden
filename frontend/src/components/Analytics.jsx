@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { 
   BarChart3, 
@@ -11,9 +11,29 @@ import {
   Flame
 } from 'lucide-react';
 
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  PointElement,
+  LineElement,
+  ArcElement,
+  Tooltip,
+  Legend,
+  TimeScale,
+  Filler
+} from 'chart.js';
+import { Bar, Line, Doughnut } from 'react-chartjs-2';
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, ArcElement, Tooltip, Legend, TimeScale, Filler);
+import ProjectAnalytics from './ProjectAnalytics';
+
 const Analytics = ({ onBack }) => {
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState(14);
+  const [selectedProject, setSelectedProject] = useState(null);
 
   useEffect(() => {
     fetchAnalytics();
@@ -21,7 +41,7 @@ const Analytics = ({ onBack }) => {
 
   const fetchAnalytics = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/analytics');
+      const response = await fetch(`http://localhost:3001/api/analytics?days=${days}`);
       if (response.ok) {
         const data = await response.json();
         setAnalytics(data);
@@ -32,6 +52,12 @@ const Analytics = ({ onBack }) => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    setLoading(true);
+    fetchAnalytics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [days]);
 
   const formatDuration = (minutes) => {
     if (minutes < 60) return `${minutes}m`;
@@ -81,19 +107,116 @@ const Analytics = ({ onBack }) => {
     return Math.min(100, Math.round(avgSessionLength + streakBonus + consistencyBonus));
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-nature-500"></div>
-      </div>
-    );
-  }
-
   const productivityScore = getProductivityScore();
   const streakDays = getStreakDays();
 
+  // Charts data
+  const dailyLine = useMemo(() => {
+    if (!analytics?.dailyFocus) return null;
+    const labels = analytics.dailyFocus.map(d => new Date(d.date).toLocaleDateString());
+    const data = analytics.dailyFocus.map(d => d.minutes);
+    return {
+      labels,
+      datasets: [
+        {
+          label: 'Minutes focused',
+          data,
+          fill: true,
+          tension: 0.35,
+          borderColor: '#34d399',
+          backgroundColor: 'rgba(52, 211, 153, 0.15)',
+          pointRadius: 2
+        }
+      ]
+    };
+  }, [analytics]);
+
+  const hourlyBar = useMemo(() => {
+    if (!analytics?.hourlyDistribution) return null;
+    return {
+      labels: Array.from({ length: 24 }, (_, i) => `${i}:00`),
+      datasets: [
+        {
+          label: 'Sessions',
+          data: analytics.hourlyDistribution,
+          backgroundColor: 'rgba(59, 130, 246, 0.5)',
+          borderColor: 'rgba(59, 130, 246, 1)'
+        }
+      ]
+    };
+  }, [analytics]);
+
+  const projectDoughnut = useMemo(() => {
+    if (!analytics?.projectFocus?.length) return null;
+    const top = analytics.projectFocus.slice(0, 6);
+    return {
+      labels: top.map(p => p.name),
+      datasets: [
+        {
+          data: top.map(p => Math.max(1, Math.round(p.totalMinutes))),
+          backgroundColor: ['#34d399','#60a5fa','#fbbf24','#f472b6','#a78bfa','#f87171']
+        }
+      ]
+    };
+  }, [analytics]);
+
+  const lengthBar = useMemo(() => {
+    if (!analytics?.sessionLengthHistogram) return null;
+    return {
+      labels: analytics.sessionLengthHistogram.labels,
+      datasets: [
+        {
+          label: 'Sessions',
+          data: analytics.sessionLengthHistogram.counts,
+          backgroundColor: 'rgba(16, 185, 129, 0.5)',
+          borderColor: 'rgba(16, 185, 129, 1)'
+        }
+      ]
+    };
+  }, [analytics]);
+
+  // Stacked per-project daily bar
+  const stackedBar = useMemo(() => {
+    if (!analytics?.perProjectDaily) return null;
+    const { dates, series } = analytics.perProjectDaily;
+    const palette = ['#34d399','#60a5fa','#fbbf24','#f472b6','#a78bfa','#f87171','#10b981','#3b82f6','#f59e0b'];
+    return {
+      labels: dates.map(d => new Date(d).toLocaleDateString()),
+      datasets: series.map((s, idx) => ({
+        label: s.name,
+        data: s.data,
+        backgroundColor: palette[idx % palette.length]
+      }))
+    };
+  }, [analytics]);
+
+  // Calendar heatmap data (simple monthly grid using dailyFocus)
+  const heatmapData = useMemo(() => {
+    if (!analytics?.dailyFocus?.length) return null;
+    return analytics.dailyFocus; // [{date, minutes}]
+  }, [analytics]);
+
+  // Dynamic unit helpers (minutes -> h or m)
+  const unitFor = (values) => {
+    const max = Math.max(0, ...values);
+    if (max >= 60 * 6) {
+      return { unit: 'h', factor: 60, tickFmt: (v)=>`${v}h`, tipFmt: (v)=>`${v.toFixed(1)} h` };
+    }
+    return { unit: 'm', factor: 1, tickFmt: (v)=>`${v}m`, tipFmt: (v)=>`${v} m` };
+  };
+
   return (
     <div className="min-h-screen p-6">
+      {loading ? (
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-nature-500"></div>
+        </div>
+      ) : (
+        <>
+      {selectedProject ? (
+        <ProjectAnalytics project={selectedProject} onBack={() => setSelectedProject(null)} />
+      ) : (
+        <>
       {/* Header */}
       <motion.header 
         className="mb-8"
@@ -119,6 +242,22 @@ const Analytics = ({ onBack }) => {
           </div>
         </div>
       </motion.header>
+
+      {/* Range selector */}
+      <div className="flex items-center gap-2 mb-6">
+        <span className="text-sm text-zen-600">Range:</span>
+        <div className="flex gap-2">
+          {[7,14,30].map(r => (
+            <button
+              key={r}
+              onClick={() => setDays(r)}
+              className={`px-3 py-1 rounded-lg text-sm ${days===r?'bg-nature-500 text-white':'bg-zen-100 text-zen-700 hover:bg-zen-200'}`}
+            >
+              {r}d
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -179,6 +318,83 @@ const Analytics = ({ onBack }) => {
         </motion.div>
       </div>
 
+      {/* Focus over time */}
+      {dailyLine && (() => {
+        const u = unitFor(dailyLine.datasets[0].data);
+        const lineOptions = {
+          responsive: true,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx)=> u.tipFmt(ctx.parsed.y) } } },
+          scales: { y: { ticks: { callback: (v)=> u.tickFmt(v) } } }
+        };
+        return (
+        <motion.div className="zen-card p-6 mb-8" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}}>
+          <h2 className="text-xl font-semibold text-zen-800 mb-4 flex items-center gap-2">
+            <TrendingUp className="text-nature-500" />
+            Focus Trend (minutes)
+          </h2>
+          <Line data={dailyLine} options={lineOptions} />
+        </motion.div>
+        );
+      })()}
+
+      {/* Distribution + Project split */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {hourlyBar && (
+          <motion.div className="zen-card p-6" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}}>
+            <h2 className="text-xl font-semibold text-zen-800 mb-4">Hourly Session Distribution</h2>
+            <Bar data={hourlyBar} options={{responsive:true, plugins:{legend:{display:false}}}} />
+          </motion.div>
+        )}
+        {projectDoughnut && (
+          <motion.div className="zen-card p-6" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}}>
+            <h2 className="text-xl font-semibold text-zen-800 mb-4">Time by Project (top)</h2>
+            <Doughnut data={projectDoughnut} />
+          </motion.div>
+        )}
+      </div>
+
+      {/* Session length buckets */}
+      {lengthBar && (()=>{
+        const u = unitFor(lengthBar.datasets[0].data);
+        const options = { responsive:true, plugins:{legend:{display:false}, tooltip:{callbacks:{label:(ctx)=>`Sessions: ${ctx.parsed.y}`}}}, scales:{ y: { ticks:{ callback:(v)=>v } } } };
+        return (
+        <motion.div className="zen-card p-6 mb-8" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}}>
+          <h2 className="text-xl font-semibold text-zen-800 mb-4">Session Length Distribution</h2>
+          <Bar data={lengthBar} options={{responsive:true, plugins:{legend:{display:false}}}} />
+        </motion.div>
+        );
+      })()}
+
+      {/* Stacked per-project daily minutes */}
+      {stackedBar && (()=>{
+        const totals = stackedBar.datasets.reduce((acc,ds)=>acc.map((v,i)=>v+(ds.data[i]||0)), Array.from({length: stackedBar.labels.length}, ()=>0));
+        const u = unitFor(totals);
+        const options = { responsive:true, plugins:{legend:{position:'bottom'}, tooltip:{callbacks:{label:(ctx)=>`${ctx.dataset.label}: ${u.tipFmt(ctx.parsed.y)}`}}}, scales:{ x:{ stacked:true }, y:{ stacked:true, ticks:{ callback:(v)=> u.tickFmt(v) } } } };
+        return (
+        <motion.div className="zen-card p-6 mb-8" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}}>
+          <h2 className="text-xl font-semibold text-zen-800 mb-4">Daily Minutes by Project</h2>
+          <Bar data={stackedBar} options={options} />
+        </motion.div>
+        );
+      })()}
+
+      {/* Calendar heatmap (simple grid) */}
+      {heatmapData && (
+        <motion.div className="zen-card p-6 mb-8" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}}>
+          <h2 className="text-xl font-semibold text-zen-800 mb-4">Calendar Heatmap</h2>
+          <div className="grid grid-cols-14 gap-1">
+            {heatmapData.map((d) => {
+              const m = d.minutes || 0;
+              const intensity = Math.min(1, m / 60); // up to 60m per day highlights
+              const bg = `rgba(52, 211, 153, ${0.1 + intensity*0.7})`;
+              return (
+                <div key={d.date} title={`${new Date(d.date).toLocaleDateString()} • ${m}m`} className="w-5 h-5 rounded" style={{backgroundColor: bg}} />
+              );
+            })}
+          </div>
+        </motion.div>
+      )}
+
       {/* Plant Statistics */}
       <motion.div
         className="zen-card p-6 mb-8"
@@ -196,8 +412,9 @@ const Analytics = ({ onBack }) => {
             {analytics.projectStats.map((project) => (
               <motion.div
                 key={project.id}
-                className="bg-nature-50 rounded-lg p-4"
+                className="bg-nature-50 rounded-lg p-4 cursor-pointer hover:shadow-md"
                 whileHover={{ scale: 1.02 }}
+                onClick={() => setSelectedProject(project)}
               >
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="font-medium text-zen-800">{project.name}</h3>
@@ -298,6 +515,10 @@ const Analytics = ({ onBack }) => {
           </div>
         )}
       </motion.div>
+      </>
+      )}
+      </>
+      )}
     </div>
   );
 };

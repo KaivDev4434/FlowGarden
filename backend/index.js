@@ -425,43 +425,117 @@ app.get('/api/sessions', async (req, res) => {
 // Analytics endpoints
 app.get('/api/analytics', async (req, res) => {
   try {
-    const totalSessions = await prisma.focusSession.count({
+    const days = parseInt(req.query.days || '30', 10);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    // Totals
+    const totalSessions = await prisma.focusSession.count({ where: { completed: true } });
+    const totalFocusTimeAgg = await prisma.focusSession.aggregate({
+      _sum: { durationMinutes: true },
       where: { completed: true }
     });
 
-    const totalFocusTime = await prisma.focusSession.aggregate({
-      _sum: {
-        durationMinutes: true
-      },
-      where: { completed: true }
-    });
-
+    // Recent sessions within range (with project)
     const recentSessions = await prisma.focusSession.findMany({
-      where: { 
+      where: {
         completed: true,
-        createdAt: {
-          gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // Last 7 days
-        }
+        createdAt: { gte: since }
       },
-      include: {
-        project: true
-      },
+      include: { project: true },
       orderBy: { createdAt: 'desc' }
     });
 
-    const projectStats = await prisma.project.findMany({
-      include: {
-        _count: {
-          select: { focusSessions: true }
-        }
+    // Project stats (count + totals in range)
+    const sessionsInRange = recentSessions; // reuse
+    const projectIdToStats = new Map();
+    for (const s of sessionsInRange) {
+      const pid = s.projectId;
+      if (!projectIdToStats.has(pid)) {
+        projectIdToStats.set(pid, {
+          id: pid,
+          name: s.project?.name || 'Unknown',
+          plantType: s.project?.plantType || 'GENERIC',
+          health: s.project?.health ?? 0,
+          sessionCount: 0,
+          totalMinutes: 0
+        });
       }
+      const entry = projectIdToStats.get(pid);
+      entry.sessionCount += 1;
+      entry.totalMinutes += s.durationMinutes || 0;
+    }
+    const projectFocus = Array.from(projectIdToStats.values()).sort((a, b) => b.totalMinutes - a.totalMinutes);
+
+    // Daily totals last N days
+    const dailyMap = new Map();
+    for (let i = 0; i < days; i++) {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      dailyMap.set(d.toISOString().slice(0, 10), 0);
+    }
+    for (const s of sessionsInRange) {
+      const key = new Date(s.createdAt).toISOString().slice(0, 10);
+      if (dailyMap.has(key)) {
+        dailyMap.set(key, (dailyMap.get(key) || 0) + (s.durationMinutes || 0));
+      }
+    }
+    const dailyFocus = Array.from(dailyMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, minutes]) => ({ date, minutes }));
+
+    // Per-project daily totals for stacked bar
+    const perProjectDailyMap = new Map(); // pid -> Map(date->minutes)
+    const dateKeys = dailyFocus.map(d => d.date);
+    for (const s of sessionsInRange) {
+      const pid = s.projectId;
+      const key = new Date(s.createdAt).toISOString().slice(0, 10);
+      if (!perProjectDailyMap.has(pid)) perProjectDailyMap.set(pid, new Map(dateKeys.map(k => [k, 0])));
+      const m = perProjectDailyMap.get(pid);
+      if (m.has(key)) m.set(key, (m.get(key) || 0) + (s.durationMinutes || 0));
+    }
+    const perProjectDaily = Array.from(perProjectDailyMap.entries()).map(([pid, map]) => ({
+      projectId: pid,
+      name: projectIdToStats.get(pid)?.name || 'Unknown',
+      data: dateKeys.map(k => map.get(k) || 0)
+    }));
+
+    // Hourly distribution (0..23) by session count
+    const hourly = Array.from({ length: 24 }, () => 0);
+    for (const s of sessionsInRange) {
+      const h = new Date(s.createdAt).getHours();
+      hourly[h] += 1;
+    }
+
+    // Session length histogram buckets by minutes
+    const buckets = [5, 15, 25, 50]; // <5, 5-15, 15-25, 25-50, 50+
+    const labels = ['<5m', '5-15m', '15-25m', '25-50m', '50m+'];
+    const counts = Array.from({ length: labels.length }, () => 0);
+    for (const s of sessionsInRange) {
+      const m = s.durationMinutes || 0;
+      if (m < buckets[0]) counts[0]++;
+      else if (m < buckets[1]) counts[1]++;
+      else if (m < buckets[2]) counts[2]++;
+      else if (m < buckets[3]) counts[3]++;
+      else counts[4]++;
+    }
+
+    // Project snapshot with counts (all-time)
+    const projectStats = await prisma.project.findMany({
+      include: { _count: { select: { focusSessions: true } } },
+      orderBy: { updatedAt: 'desc' }
     });
 
     res.json({
       totalSessions,
-      totalFocusTime: totalFocusTime._sum.durationMinutes || 0,
+      totalFocusTime: totalFocusTimeAgg._sum.durationMinutes || 0,
       recentSessions,
-      projectStats
+      projectStats,
+      dailyFocus,
+      perProjectDaily: { dates: dateKeys, series: perProjectDaily },
+      hourlyDistribution: hourly,
+      sessionLengthHistogram: { labels, counts },
+      projectFocus
     });
   } catch (error) {
     console.error('Error fetching analytics:', error);
