@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Play, Pause, Square, SkipForward, Volume2, VolumeX, RotateCcw } from 'lucide-react';
 import { motion } from 'framer-motion';
 import soundService from '../services/soundService';
+import timerService from '../services/timerService';
+import apiService from '../services/apiService';
 import { PlantFactory } from '../plants/PlantFactory';
 import { PlantAnimationManager } from '../animations/plantAnimations';
 
@@ -19,8 +21,10 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
   const [elapsedTime, setElapsedTime] = useState(0);
   const [ambientPlaying, setAmbientPlaying] = useState(false);
   const [soundsEnabled, setSoundsEnabled] = useState(true);
+  const [timerHealth, setTimerHealth] = useState(true);
   
   const intervalRef = useRef(null);
+  const timerIdRef = useRef(null);
   const plantContainerRef = useRef(null);
   const plantInstanceRef = useRef(null);
   const animationManagerRef = useRef(null);
@@ -87,24 +91,21 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
   useEffect(() => {
     const loadUserSettings = async () => {
       try {
-        const response = await fetch('/api/settings');
-        if (response.ok) {
-          const settings = await response.json();
-          setUserSettings(settings);
-          
-          // Convert focus time to seconds using the time unit
-          const focusTimeValue = settings.defaultFocusTime || 10;
-          const focusTimeUnit = settings.defaultFocusTimeUnit || 'seconds';
-          const timerDuration = convertToSeconds(focusTimeValue, focusTimeUnit);
-          
-          setTimeLeft(timerDuration);
-          setOriginalTimeLeft(timerDuration);
-        }
+        const settings = await apiService.getSettings();
+        setUserSettings(settings);
+        
+        // Convert focus time to seconds using the time unit
+        const focusTimeValue = settings.defaultFocusTime || 25;
+        const focusTimeUnit = settings.defaultFocusTimeUnit || 'minutes';
+        const timerDuration = convertToSeconds(focusTimeValue, focusTimeUnit);
+        
+        setTimeLeft(timerDuration);
+        setOriginalTimeLeft(timerDuration);
       } catch (error) {
         console.error('Error loading user settings:', error);
-        // Fallback to 10 seconds for testing
-        setTimeLeft(10);
-        setOriginalTimeLeft(10);
+        // Fallback to default 25 minutes
+        setTimeLeft(1500);
+        setOriginalTimeLeft(1500);
       }
     };
 
@@ -123,27 +124,20 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
     const createSession = async () => {
       if (!sessionCreated && !sessionId) {
         try {
-          const response = await fetch('/api/sessions/start', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              projectId: project.id,
-              sessionType
-            }),
-          });
-          
-          if (response.ok) {
-            const sessionData = await response.json();
-            setSessionId(sessionData.id);
-            setSessionStartTime(new Date());
-            setSessionCreated(true);
-          } else {
-            console.error('Failed to create session:', response.status, response.statusText);
-          }
+          const sessionData = await apiService.startSession(project.id, sessionType);
+          setSessionId(sessionData.id);
+          setSessionStartTime(new Date());
+          setSessionCreated(true);
         } catch (error) {
           console.error('Error creating session:', error);
+          // Create offline session
+          const offlineSession = {
+            id: `offline_${Date.now()}`,
+            offline: true
+          };
+          setSessionId(offlineSession.id);
+          setSessionStartTime(new Date());
+          setSessionCreated(true);
         }
       }
     };
@@ -151,22 +145,79 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
     createSession();
   }, [project.id, sessionType, sessionCreated, sessionId]);
 
-  // Timer logic
+  // Initialize timer service and setup
   useEffect(() => {
-    if (isRunning) {
-      intervalRef.current = setInterval(() => {
-        if (sessionType === 'TIMED') {
-                setTimeLeft(prev => prev - 1);
-        }
-        
-        setElapsedTime(prev => prev + 1);
-      }, 1000);
-    } else {
-      clearInterval(intervalRef.current);
-    }
+    // Generate unique timer ID for this session
+    timerIdRef.current = `focus-${sessionId || Date.now()}`;
+    
+    // Check timer service health
+    setTimerHealth(timerService.isHealthy());
+    
+    return () => {
+      // Cleanup timer on unmount
+      if (timerIdRef.current) {
+        timerService.stopTimer(timerIdRef.current);
+      }
+    };
+  }, [sessionId]);
 
-    return () => clearInterval(intervalRef.current);
-  }, [isRunning, sessionType]);
+  // Timer service integration
+  const startTimerService = async () => {
+    if (!timerIdRef.current) return;
+
+    const timerId = timerIdRef.current;
+    
+    if (sessionType === 'TIMED') {
+      // Start countdown timer
+      await timerService.startTimer(timerId, {
+        duration: timeLeft,
+        type: 'countdown',
+        onUpdate: (payload) => {
+          setTimeLeft(payload.remainingTime);
+          setElapsedTime(payload.elapsedTime);
+        },
+        onFinished: (payload) => {
+          setIsRunning(false);
+          setTimeLeft(0);
+          setElapsedTime(payload.elapsedTime);
+          handleComplete();
+        },
+        onPaused: () => {
+          setIsRunning(false);
+        },
+        onResumed: () => {
+          setIsRunning(true);
+        }
+      });
+    } else {
+      // Start stopwatch timer for open sessions
+      await timerService.startTimer(timerId, {
+        duration: 0,
+        type: 'stopwatch',
+        onUpdate: (payload) => {
+          setElapsedTime(payload.elapsedTime);
+        }
+      });
+    }
+  };
+
+  const stopTimerService = () => {
+    if (timerIdRef.current) {
+      timerService.stopTimer(timerIdRef.current);
+    }
+  };
+
+  const pauseTimerService = () => {
+    if (timerIdRef.current) {
+      timerService.pauseTimer(timerIdRef.current);
+    }
+  };
+
+  const resumeTimerService = () => {
+    if (timerIdRef.current) {
+      timerService.resumeTimer(timerIdRef.current);
+    }
+  };
 
   // Handle timer completion
   useEffect(() => {
@@ -187,27 +238,19 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
         
         // Start focus session on backend
         try {
-          const response = await fetch('/api/sessions/start', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              projectId: project.id,
-              sessionType
-            }),
-          });
-          
-          if (response.ok) {
-            const sessionData = await response.json();
-            setSessionId(sessionData.id);
-          }
+          const sessionData = await apiService.startSession(project.id, sessionType);
+          setSessionId(sessionData.id);
         } catch (error) {
           console.error('Error starting session:', error);
+          // Will work offline
         }
       }
+      
+      // Start timer service
+      await startTimerService();
     } else {
       setIsRunning(false);
+      pauseTimerService();
     }
   };
 
@@ -238,7 +281,7 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
 
   const handleComplete = async () => {
     setIsRunning(false);
-    clearInterval(intervalRef.current);
+    stopTimerService();
 
     const durationMinutes = Math.floor(elapsedTime / 60);
     
@@ -253,25 +296,10 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
     // Complete session on backend
     if (sessionId) {
       try {
-        const response = await fetch(`/api/sessions/${sessionId}/complete`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            durationMinutes
-          }),
-        });
-        
-        if (response.ok) {
-          await response.json();
-        } else {
-          console.error('Failed to complete session:', response.status, response.statusText);
-          const errorText = await response.text();
-          console.error('Error response:', errorText);
-        }
+        await apiService.completeSession(sessionId, durationMinutes);
       } catch (error) {
         console.error('Error completing session:', error);
+        // Session completion will be retried when connection is restored
       }
     } else {
       console.warn('No session ID available, cannot complete session on backend');
@@ -317,10 +345,10 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
 
   const handleReset = () => {
     setIsRunning(false);
+    stopTimerService();
     setTimeLeft(originalTimeLeft); // Reset to the settings-based duration
     setElapsedTime(0);
     setSessionStartTime(null);
-    clearInterval(intervalRef.current);
   };
 
   const formatTime = (seconds) => {
@@ -384,6 +412,13 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
           {userSettings && (
             <div className="mt-3 text-sm text-nature-600 bg-nature-50 rounded-lg px-3 py-1 inline-block">
               Timer Setting: {userSettings.defaultFocusTime} {userSettings.defaultFocusTimeUnit}
+            </div>
+          )}
+          
+          {/* Timer Health Indicator */}
+          {!timerHealth && (
+            <div className="mt-2 text-xs text-orange-600 bg-orange-50 rounded-lg px-3 py-1 inline-block">
+              ⚠️ Using fallback timer (Web Worker unavailable)
             </div>
           )}
         </div>

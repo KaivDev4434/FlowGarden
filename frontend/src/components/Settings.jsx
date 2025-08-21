@@ -14,6 +14,7 @@ import {
   Smartphone,
   Settings as SettingsIcon
 } from 'lucide-react';
+import apiService from '../services/apiService';
 
 const Settings = ({ onBack }) => {
   const [settings, setSettings] = useState({
@@ -73,43 +74,31 @@ const Settings = ({ onBack }) => {
 
   const loadSettings = async () => {
     try {
-      const response = await fetch('/api/settings');
-      if (response.ok) {
-        const userSettings = await response.json();
-        setSettings(prev => ({
-          ...prev,
-          ...userSettings
-        }));
-        setOriginalSettings({
-          ...settings,
-          ...userSettings
-        });
-      }
+      const userSettings = await apiService.getSettings();
+      setSettings(prev => ({
+        ...prev,
+        ...userSettings
+      }));
+      setOriginalSettings({
+        ...settings,
+        ...userSettings
+      });
     } catch (error) {
       console.error('Error loading settings:', error);
+      // Settings will fall back to defaults from apiService
     }
   };
 
   const saveSettings = async () => {
     setSaving(true);
     try {
-      
-      const response = await fetch('/api/settings', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(settings),
-      });
-
-      if (response.ok) {
-        const savedSettings = await response.json();
-        setOriginalSettings(settings);
-        setHasChanges(false);
-        
-      }
+      const savedSettings = await apiService.saveSettings(settings);
+      setOriginalSettings(settings);
+      setHasChanges(false);
     } catch (error) {
       console.error('Error saving settings:', error);
+      // Show user feedback about the error
+      alert('Settings could not be saved. They will be saved locally and synced when connection is restored.');
     } finally {
       setSaving(false);
     }

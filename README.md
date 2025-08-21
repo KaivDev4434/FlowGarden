@@ -8,10 +8,14 @@ A minimalist focus tracking app where users grow virtual plants by maintaining c
 - **Beautiful Animations**: Lottie-powered plant animations with 5 growth stages
 - **Multiple Plant Types**: Choose from succulents, bonsai, flowers, herbs, and trees
 - **Focus Timer**: 25-minute Pomodoro sessions or open-ended focus time
+- **Tab-Resistant Timers**: Web Worker-powered timers that work accurately even when tab is inactive
+- **Offline Support**: Continue working even without internet connection
 - **Health System**: Plants gain health from consistent focus, lose health from neglect
 - **Zen Design**: Calming color palette and smooth animations
 - **Real-time Clock**: Always know the current time while focusing
 - **Analytics**: Track your focus sessions and plant growth over time
+- **Connection Status**: Visual indicators for network connectivity
+- **Auto-Recovery**: Automatically resume timers after page refresh or tab reactivation
 
 ## 🛠️ Tech Stack
 
@@ -170,6 +174,25 @@ FlowGarden embraces minimalism and zen principles:
 - **Clean Typography**: Easy-to-read fonts and spacing
 - **Intuitive UX**: Clear visual hierarchy and user flows
 - **Mindful Interactions**: Purposeful clicks and transitions
+
+## 🔧 Recent Improvements (Timer & Network Reliability)
+
+### Tab Throttling Fix
+- **Web Worker Timers**: Implemented background timer service using Web Workers to prevent browser tab throttling
+- **Accurate Timing**: Timers now maintain precision even when tab is minimized or inactive
+- **Fallback Support**: Graceful degradation to regular timers if Web Workers are unavailable
+
+### Network Resilience
+- **API Service**: Robust API service with automatic retry logic and exponential backoff
+- **Offline Support**: Continue working when internet connection is lost
+- **Connection Status**: Real-time indicators showing network connectivity
+- **Auto-Recovery**: Automatic synchronization when connection is restored
+- **Local Caching**: Settings and session data cached locally for offline operation
+
+### Error Handling
+- **Graceful Degradation**: App continues to function even with server issues
+- **User Feedback**: Clear indicators when using fallback modes
+- **Queue System**: Failed operations are queued and retried automatically
 
 ## 🌟 Future Enhancements
 

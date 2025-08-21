@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Play, Pause, SkipForward, Coffee, TreePine, RotateCcw, Square } from 'lucide-react';
 import { motion } from 'framer-motion';
 import soundService from '../services/soundService';
+import timerService from '../services/timerService';
+import apiService from '../services/apiService';
 
 const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHORT', sessionNumber = 1 }) => {
   const [userSettings, setUserSettings] = useState(null);
@@ -11,8 +13,10 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
   const [breakStartTime, setBreakStartTime] = useState(null);
   const [breakId, setBreakId] = useState(null);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [timerHealth, setTimerHealth] = useState(true);
   
   const intervalRef = useRef(null);
+  const timerIdRef = useRef(null);
 
   // Helper function to convert time to seconds
   const convertToSeconds = (value, unit) => {
@@ -28,32 +32,27 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
   useEffect(() => {
     const loadUserSettings = async () => {
       try {
-        const response = await fetch('http://localhost:3001/api/settings');
-        if (response.ok) {
-          const settings = await response.json();
-          setUserSettings(settings);
+        const settings = await apiService.getSettings();
+        setUserSettings(settings);
+        
+        // Set break duration based on type and settings with time units
+        const breakDurationValue = breakType === 'LONG' 
+          ? (settings.longBreakTime || 5) 
+          : (settings.shortBreakTime || 2);
+        const breakDurationUnit = breakType === 'LONG'
+          ? (settings.longBreakTimeUnit || 'minutes')
+          : (settings.shortBreakTimeUnit || 'minutes');
+        
+        const timerDuration = convertToSeconds(breakDurationValue, breakDurationUnit);
           
-          // Set break duration based on type and settings with time units
-          const breakDurationValue = breakType === 'LONG' 
-            ? (settings.longBreakTime || 5) 
-            : (settings.shortBreakTime || 2);
-          const breakDurationUnit = breakType === 'LONG'
-            ? (settings.longBreakTimeUnit || 'minutes')
-            : (settings.shortBreakTimeUnit || 'minutes');
-          
-          const timerDuration = convertToSeconds(breakDurationValue, breakDurationUnit);
-            
-          setTimeLeft(timerDuration);
-          setOriginalTimeLeft(timerDuration);
-          
-          
-          
-          // Auto-start break if enabled
-          if (settings.autoStartBreaks) {
-            setTimeout(() => {
-              handleStart();
-            }, 1000); // 1 second delay for user to see the break screen
-          }
+        setTimeLeft(timerDuration);
+        setOriginalTimeLeft(timerDuration);
+        
+        // Auto-start break if enabled
+        if (settings.autoStartBreaks) {
+          setTimeout(() => {
+            handleStart();
+          }, 1000); // 1 second delay for user to see the break screen
         }
       } catch (error) {
         console.error('Error loading user settings:', error);
@@ -65,6 +64,22 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
     loadUserSettings();
   }, [breakType]);
 
+  // Initialize timer service
+  useEffect(() => {
+    // Generate unique timer ID for this break session
+    timerIdRef.current = `break-${breakId || Date.now()}`;
+    
+    // Check timer service health
+    setTimerHealth(timerService.isHealthy());
+    
+    return () => {
+      // Cleanup timer on unmount
+      if (timerIdRef.current) {
+        timerService.stopTimer(timerIdRef.current);
+      }
+    };
+  }, [breakId]);
+
   // Auto-create break session when component mounts
   useEffect(() => {
     let isCancelled = false; // Flag to prevent race conditions
@@ -72,27 +87,24 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
     const createBreakSession = async () => {
       if (!breakId && !isCancelled) {
         try {
+          const breakSession = await apiService.createBreakSession(
+            project.id, 
+            breakType, 
+            sessionNumber
+          );
           
-          
-          const response = await fetch('http://localhost:3001/api/break-sessions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              projectId: project.id,
-              breakType: breakType,
-              sessionNumber: sessionNumber
-            }),
-          });
-
-          if (response.ok && !isCancelled) {
-            const breakSession = await response.json();
+          if (!isCancelled) {
             setBreakId(breakSession.id);
           }
         } catch (error) {
           if (!isCancelled) {
             console.error('Error creating break session:', error);
+            // Create offline break session
+            const offlineBreak = {
+              id: `offline_break_${Date.now()}`,
+              offline: true
+            };
+            setBreakId(offlineBreak.id);
           }
         }
       } else if (breakId) {
@@ -110,19 +122,52 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
   // If auto-start breaks is disabled, don't auto-start here.
   // Start is handled by settings-based effect above.
 
-  // Timer logic
-  useEffect(() => {
-    if (isRunning && timeLeft > 0) {
-      intervalRef.current = setInterval(() => {
-        setTimeLeft(prev => prev - 1);
-        setElapsedTime(prev => prev + 1);
-      }, 1000);
-    } else {
-      clearInterval(intervalRef.current);
-    }
+  // Timer service integration
+  const startTimerService = async () => {
+    if (!timerIdRef.current) return;
 
-    return () => clearInterval(intervalRef.current);
-  }, [isRunning, timeLeft]);
+    const timerId = timerIdRef.current;
+    
+    // Start countdown timer for break
+    await timerService.startTimer(timerId, {
+      duration: timeLeft,
+      type: 'countdown',
+      onUpdate: (payload) => {
+        setTimeLeft(payload.remainingTime);
+        setElapsedTime(payload.elapsedTime);
+      },
+      onFinished: (payload) => {
+        setIsRunning(false);
+        setTimeLeft(0);
+        setElapsedTime(payload.elapsedTime);
+        handleComplete();
+      },
+      onPaused: () => {
+        setIsRunning(false);
+      },
+      onResumed: () => {
+        setIsRunning(true);
+      }
+    });
+  };
+
+  const stopTimerService = () => {
+    if (timerIdRef.current) {
+      timerService.stopTimer(timerIdRef.current);
+    }
+  };
+
+  const pauseTimerService = () => {
+    if (timerIdRef.current) {
+      timerService.pauseTimer(timerIdRef.current);
+    }
+  };
+
+  const resumeTimerService = () => {
+    if (timerIdRef.current) {
+      timerService.resumeTimer(timerIdRef.current);
+    }
+  };
 
   // Handle timer completion
   useEffect(() => {
@@ -131,7 +176,7 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
     }
   }, [timeLeft, isRunning]);
 
-  const handleStart = () => {
+  const handleStart = async () => {
     setIsRunning(true);
     if (!breakStartTime) {
       setBreakStartTime(new Date());
@@ -141,16 +186,19 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
     if (userSettings?.soundsEnabled && userSettings?.notificationSounds) {
       soundService.playBreakStart();
     }
+    
+    // Start timer service
+    await startTimerService();
   };
 
   const handlePause = () => {
     setIsRunning(false);
+    pauseTimerService();
   };
 
   const handleComplete = async () => {
-    
     setIsRunning(false);
-    clearInterval(intervalRef.current);
+    stopTimerService();
     
     // Play completion sound
     if (userSettings?.soundsEnabled && userSettings?.notificationSounds) {
@@ -162,7 +210,7 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
       try {
         const durationMinutes = elapsedTime / 60;
         
-        await fetch(`http://localhost:3001/api/break-sessions/${breakId}/complete`, {
+        await fetch(`/api/break-sessions/${breakId}/complete`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -185,11 +233,11 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
 
   const handleSkipBreak = () => {
     setIsRunning(false);
-    clearInterval(intervalRef.current);
+    stopTimerService();
     
     // Mark break as skipped
     if (breakId) {
-      fetch(`http://localhost:3001/api/break-sessions/${breakId}/skip`, {
+      fetch(`/api/break-sessions/${breakId}/skip`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -205,11 +253,10 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
 
   const handleReset = () => {
     setIsRunning(false);
+    stopTimerService();
     setTimeLeft(originalTimeLeft);
     setElapsedTime(0);
     setBreakStartTime(null);
-    clearInterval(intervalRef.current);
-    
   };
 
   const formatTime = (seconds) => {
@@ -388,6 +435,13 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
                 ? `${userSettings.longBreakTime} ${userSettings.longBreakTimeUnit} break` 
                 : `${userSettings.shortBreakTime} ${userSettings.shortBreakTimeUnit} break`}
             </div>
+            
+            {/* Timer Health Indicator */}
+            {!timerHealth && (
+              <div className="mt-2 text-xs text-orange-600 bg-orange-50 rounded-lg px-3 py-1 inline-block">
+                ⚠️ Using fallback timer (Web Worker unavailable)
+              </div>
+            )}
           </motion.div>
         )}
 
