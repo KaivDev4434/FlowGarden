@@ -8,8 +8,6 @@ import { PlantFactory } from '../plants/PlantFactory';
 import { PlantAnimationManager } from '../animations/plantAnimations';
 
 const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refreshSettings = false, autoStart = false }) => {
-  
-  
   const [userSettings, setUserSettings] = useState(null);
   const [timeLeft, setTimeLeft] = useState(1500); // 25 minutes default
   const [originalTimeLeft, setOriginalTimeLeft] = useState(1500);
@@ -22,6 +20,7 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
   const [ambientPlaying, setAmbientPlaying] = useState(false);
   const [soundsEnabled, setSoundsEnabled] = useState(true);
   const [timerHealth, setTimerHealth] = useState(true);
+  const [timerRecovered, setTimerRecovered] = useState(false);
   
   const intervalRef = useRef(null);
   const timerIdRef = useRef(null);
@@ -99,25 +98,23 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
         const focusTimeUnit = settings.defaultFocusTimeUnit || 'minutes';
         const timerDuration = convertToSeconds(focusTimeValue, focusTimeUnit);
         
-        setTimeLeft(timerDuration);
-        setOriginalTimeLeft(timerDuration);
+        // Only update time if no timer was recovered
+        if (!timerRecovered) {
+          setTimeLeft(timerDuration);
+          setOriginalTimeLeft(timerDuration);
+        }
       } catch (error) {
         console.error('Error loading user settings:', error);
         // Fallback to default 25 minutes
-        setTimeLeft(1500);
-        setOriginalTimeLeft(1500);
+        if (!timerRecovered) {
+          setTimeLeft(1500);
+          setOriginalTimeLeft(1500);
+        }
       }
     };
 
     loadUserSettings();
-  }, []);
-
-  // Auto-start the focus timer if requested (e.g., after a break)
-  useEffect(() => {
-    if (autoStart && !isRunning) {
-      handleStart();
-    }
-  }, [autoStart]);
+  }, [timerRecovered]);
 
   // Auto-create session when component mounts
   useEffect(() => {
@@ -145,21 +142,85 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
     createSession();
   }, [project.id, sessionType, sessionCreated, sessionId]);
 
-  // Initialize timer service and setup
+  // **ENHANCED: Generate consistent timer ID that survives component remounts**
   useEffect(() => {
-    // Generate unique timer ID for this session
-    timerIdRef.current = `focus-${sessionId || Date.now()}`;
+    // Use project ID for consistent timer ID across page loads
+    timerIdRef.current = timerService.constructor.generateTimerId(project.id, 'focus');
     
     // Check timer service health
     setTimerHealth(timerService.isHealthy());
     
+    // **REMOVED: Timer cleanup on unmount - let timer continue running**
     return () => {
-      // Cleanup timer on unmount
-      if (timerIdRef.current) {
-        timerService.stopTimer(timerIdRef.current);
+      console.log('[Focus Session] Component unmounting, keeping timer running');
+      // Don't stop timer here - only stop on explicit exit or completion
+    };
+  }, [project.id]); // Only depend on project.id
+
+  // **NEW: Timer recovery and connection logic**
+  useEffect(() => {
+    const initializeTimer = async () => {
+      if (!timerIdRef.current) return;
+
+      try {
+        // Check if timer already exists and is running
+        const existingTimer = await timerService.getTimerState(timerIdRef.current);
+        
+        if (existingTimer) {
+          console.log('[Focus Session] Found existing timer:', existingTimer);
+          
+          // Reconnect to existing timer
+          setTimeLeft(existingTimer.remainingTime);
+          setElapsedTime(existingTimer.elapsedTime);
+          setIsRunning(existingTimer.isRunning && !existingTimer.isPaused);
+          setTimerRecovered(true);
+          
+          if (existingTimer.startTime) {
+            setSessionStartTime(new Date(existingTimer.startTime));
+          }
+          
+          // Subscribe to timer events
+          timerService.subscribeToTimer(timerIdRef.current, {
+            onUpdate: (payload) => {
+              setTimeLeft(payload.remainingTime);
+              setElapsedTime(payload.elapsedTime);
+            },
+            onFinished: (payload) => {
+              setIsRunning(false);
+              setTimeLeft(0);
+              setElapsedTime(payload.elapsedTime);
+              handleComplete();
+            },
+            onPaused: () => {
+              setIsRunning(false);
+            },
+            onResumed: () => {
+              setIsRunning(true);
+            }
+          });
+          
+          console.log('[Focus Session] Reconnected to existing timer');
+        } else {
+          console.log('[Focus Session] No existing timer found');
+          setTimerRecovered(false);
+        }
+      } catch (error) {
+        console.error('[Focus Session] Error checking for existing timer:', error);
+        setTimerRecovered(false);
       }
     };
-  }, [sessionId]);
+
+    initializeTimer();
+  }, [timerIdRef.current, project.id]);
+
+  // Auto-start the focus timer if requested (e.g., after a break)
+  useEffect(() => {
+    if (autoStart && !isRunning && !timerRecovered) {
+      setTimeout(() => {
+        handleStart();
+      }, 500);
+    }
+  }, [autoStart, timerRecovered]);
 
   // Timer service integration
   const startTimerService = async () => {
@@ -168,7 +229,7 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
     const timerId = timerIdRef.current;
     
     if (sessionType === 'TIMED') {
-      // Start countdown timer
+      // Start countdown timer (will check for existing timer internally)
       await timerService.startTimer(timerId, {
         duration: timeLeft,
         type: 'countdown',
@@ -226,6 +287,7 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
     }
   }, [timeLeft, sessionType, isRunning]);
 
+  // **UPDATED: Handle start with timer existence check**
   const handleStart = async () => {
     if (!isRunning) {
       setIsRunning(true);
@@ -246,7 +308,7 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
         }
       }
       
-      // Start timer service
+      // Start timer service (it will check for existing timer internally)
       await startTimerService();
     } else {
       setIsRunning(false);
@@ -351,6 +413,16 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
     setSessionStartTime(null);
   };
 
+  // **UPDATED: Only stop timer on explicit exit**
+  const handleCancel = () => {
+    console.log('[Focus Session] Explicit exit - stopping timer');
+    setIsRunning(false);
+    if (timerIdRef.current) {
+      timerService.stopTimer(timerIdRef.current);
+    }
+    onCancel();
+  };
+
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -419,6 +491,13 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
           {!timerHealth && (
             <div className="mt-2 text-xs text-orange-600 bg-orange-50 rounded-lg px-3 py-1 inline-block">
               ⚠️ Using fallback timer (Web Worker unavailable)
+            </div>
+          )}
+
+          {/* Timer Recovery Indicator */}
+          {timerRecovered && (
+            <div className="mt-2 text-xs text-green-600 bg-green-50 rounded-lg px-3 py-1 inline-block">
+              ✅ Timer recovered - continuing previous session
             </div>
           )}
         </div>
@@ -494,7 +573,7 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
               }`}
               disabled={isRunning}
             >
-{userSettings ? 
+              {userSettings ? 
                 `${userSettings.defaultFocusTime} ${userSettings.defaultFocusTimeUnit} Timer` : 
                 'Timer (Loading...)'
               }
@@ -583,12 +662,12 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
             ) : (
               <>
                 <Play size={20} />
-                {sessionStartTime ? 'Resume' : 'Start'}
+                {sessionStartTime || timerRecovered ? 'Resume' : 'Start'}
               </>
             )}
           </button>
 
-          {sessionStartTime && (
+          {(sessionStartTime || timerRecovered) && (
             <>
               <button
                 onClick={handleReset}
@@ -608,9 +687,9 @@ const FocusSession = ({ project, sessionNumber = 1, onComplete, onCancel, refres
           )}
         </div>
 
-        {/* Exit Button */}
+        {/* Exit Button - Updated to use handleCancel */}
         <button
-          onClick={onCancel}
+          onClick={handleCancel}
           className="text-zen-500 hover:text-zen-700 transition-colors text-sm flex items-center gap-2 mx-auto"
         >
           <Square size={16} />

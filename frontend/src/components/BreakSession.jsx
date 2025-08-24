@@ -14,6 +14,7 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
   const [breakId, setBreakId] = useState(null);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [timerHealth, setTimerHealth] = useState(true);
+  const [timerRecovered, setTimerRecovered] = useState(false);
   
   const intervalRef = useRef(null);
   const timerIdRef = useRef(null);
@@ -44,41 +45,93 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
           : (settings.shortBreakTimeUnit || 'minutes');
         
         const timerDuration = convertToSeconds(breakDurationValue, breakDurationUnit);
-          
-        setTimeLeft(timerDuration);
-        setOriginalTimeLeft(timerDuration);
         
-        // Auto-start break if enabled
-        if (settings.autoStartBreaks) {
+        // Only update time if no timer was recovered
+        if (!timerRecovered) {
+          setTimeLeft(timerDuration);
+          setOriginalTimeLeft(timerDuration);
+        }
+        
+        // Auto-start break if enabled and no timer was recovered
+        if (settings.autoStartBreaks && !timerRecovered) {
           setTimeout(() => {
             handleStart();
           }, 1000); // 1 second delay for user to see the break screen
         }
       } catch (error) {
         console.error('Error loading user settings:', error);
-        setTimeLeft(breakType === 'LONG' ? 900 : 300);
-        setOriginalTimeLeft(breakType === 'LONG' ? 900 : 300);
+        if (!timerRecovered) {
+          setTimeLeft(breakType === 'LONG' ? 900 : 300);
+          setOriginalTimeLeft(breakType === 'LONG' ? 900 : 300);
+        }
       }
     };
 
     loadUserSettings();
-  }, [breakType]);
+  }, [breakType, timerRecovered]);
 
-  // Initialize timer service
+  // **ENHANCED: Generate consistent timer ID that survives component remounts**
   useEffect(() => {
-    // Generate unique timer ID for this break session
-    timerIdRef.current = `break-${breakId || Date.now()}`;
+    // Generate consistent timer ID for break sessions based on project
+    timerIdRef.current = timerService.constructor.generateTimerId(project.id, 'break');
     
-    // Check timer service health
     setTimerHealth(timerService.isHealthy());
     
+    // **REMOVED: Timer cleanup on unmount - let timer continue running**
     return () => {
-      // Cleanup timer on unmount
-      if (timerIdRef.current) {
-        timerService.stopTimer(timerIdRef.current);
+      console.log('[Break Session] Component unmounting, keeping timer running');
+      // Don't stop timer here - only stop on explicit exit or completion
+    };
+  }, [project.id]);
+
+  // **NEW: Timer recovery logic similar to FocusSession**
+  useEffect(() => {
+    const initializeTimer = async () => {
+      if (!timerIdRef.current) return;
+
+      try {
+        const existingTimer = await timerService.getTimerState(timerIdRef.current);
+        
+        if (existingTimer && existingTimer.isRunning) {
+          console.log('[Break Session] Found existing timer:', existingTimer);
+          
+          setTimeLeft(existingTimer.remainingTime);
+          setElapsedTime(existingTimer.elapsedTime);
+          setIsRunning(!existingTimer.isPaused);
+          setTimerRecovered(true);
+          
+          if (existingTimer.startTime) {
+            setBreakStartTime(new Date(existingTimer.startTime));
+          }
+          
+          timerService.subscribeToTimer(timerIdRef.current, {
+            onUpdate: (payload) => {
+              setTimeLeft(payload.remainingTime);
+              setElapsedTime(payload.elapsedTime);
+            },
+            onFinished: (payload) => {
+              setIsRunning(false);
+              setTimeLeft(0);
+              setElapsedTime(payload.elapsedTime);
+              handleComplete();
+            },
+            onPaused: () => setIsRunning(false),
+            onResumed: () => setIsRunning(true)
+          });
+
+          console.log('[Break Session] Reconnected to existing timer');
+        } else {
+          console.log('[Break Session] No existing timer found');
+          setTimerRecovered(false);
+        }
+      } catch (error) {
+        console.error('[Break Session] Error checking for existing timer:', error);
+        setTimerRecovered(false);
       }
     };
-  }, [breakId]);
+
+    initializeTimer();
+  }, [timerIdRef.current, project.id]);
 
   // Auto-create break session when component mounts
   useEffect(() => {
@@ -107,7 +160,6 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
             setBreakId(offlineBreak.id);
           }
         }
-      } else if (breakId) {
       }
     };
 
@@ -119,16 +171,13 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
     };
   }, []); // Empty dependency array to run only once
 
-  // If auto-start breaks is disabled, don't auto-start here.
-  // Start is handled by settings-based effect above.
-
   // Timer service integration
   const startTimerService = async () => {
     if (!timerIdRef.current) return;
 
     const timerId = timerIdRef.current;
     
-    // Start countdown timer for break
+    // Start countdown timer for break (will check for existing timer internally)
     await timerService.startTimer(timerId, {
       duration: timeLeft,
       type: 'countdown',
@@ -221,14 +270,12 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
           }),
         });
         
-        
       } catch (error) {
         console.error('Error completing break session:', error);
       }
     }
 
     onComplete();
-    
   };
 
   const handleSkipBreak = () => {
@@ -257,6 +304,16 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
     setTimeLeft(originalTimeLeft);
     setElapsedTime(0);
     setBreakStartTime(null);
+  };
+
+  // **NEW: Explicit cancel handler that stops timer**
+  const handleCancel = () => {
+    console.log('[Break Session] Explicit exit - stopping timer');
+    setIsRunning(false);
+    if (timerIdRef.current) {
+      timerService.stopTimer(timerIdRef.current);
+    }
+    onCancel();
   };
 
   const formatTime = (seconds) => {
@@ -325,6 +382,13 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
           <p className="text-blue-600 text-lg font-light">
             {getBreakDescription()}
           </p>
+
+          {/* Timer Recovery Indicator */}
+          {timerRecovered && (
+            <div className="mt-3 text-xs text-green-600 bg-green-50 rounded-lg px-3 py-1 inline-block">
+              ✅ Break timer recovered - continuing previous break
+            </div>
+          )}
         </motion.div>
 
         {/* Central animated circle with timer */}
@@ -463,7 +527,7 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
             )}
           </button>
 
-          {breakStartTime && (
+          {(breakStartTime || timerRecovered) && (
             <>
               <button
                 onClick={handleReset}
@@ -521,7 +585,7 @@ const BreakSession = ({ project, onComplete, onSkip, onCancel, breakType = 'SHOR
                 </button>
               )}
               <button
-                onClick={onCancel}
+                onClick={handleCancel}
                 className="text-blue-500 hover:text-blue-700 transition-colors text-sm flex items-center gap-2 mx-auto opacity-60 hover:opacity-100"
               >
                 <Square size={14} />
